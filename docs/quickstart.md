@@ -6,12 +6,20 @@ credentials never leaving your machine.
 ## 1. Install
 
 ```bash
-git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
-uv sync
+uv tool install janus-mcp-server     # or: pipx install janus-mcp-server
 ```
 
-(Once published to PyPI, this becomes `uv tool install janus-mcp-server` and every
-`uv --directory … run janus-mcp` below becomes just `uvx janus-mcp-server`.)
+This gives you the `janus-mcp` CLI. One-shot alternative without installing:
+`uvx janus-mcp-server serve` (every `janus-mcp serve` below becomes
+`uvx janus-mcp-server serve`).
+
+**From source** (for contributors):
+
+```bash
+git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
+uv sync
+uv run janus-mcp serve               # prefix with `uv run` when running from source
+```
 
 ## 2. Configure
 
@@ -34,7 +42,7 @@ If your kubeconfig isn't at `~/.kube/config`, also set `kubeconfig: /path/to/fil
 Sanity-check before registering with any client:
 
 ```bash
-uv run janus-mcp serve   # should print warnings (if any) and wait; Ctrl-C to stop
+janus-mcp serve   # should print warnings (if any) and wait; Ctrl-C to stop
 ```
 
 It refuses to start with a clear message if the context is missing or
@@ -44,15 +52,16 @@ kubeconfig can read Secrets — janus-mcp never will, but see
 
 ## 3. Register with your MCP client
 
-All recipes assume the checkout is at `~/git/janus-mcp`; adjust the path.
+All recipes use `janus-mcp-server` from PyPI. For a source checkout, replace
+`janus-mcp-server` with `janus-mcp` and prefix with `uvx` / `uv`.
 Client config formats change — when in doubt, check your client's MCP docs.
 
 ### Claude Code
 
 ```bash
-claude mcp add kubernetes -- uv --directory ~/git/janus-mcp run janus-mcp serve
+claude mcp add kubernetes -- uvx janus-mcp-server serve
 # or for all your projects:
-claude mcp add --scope user kubernetes -- uv --directory ~/git/janus-mcp run janus-mcp serve
+claude mcp add --scope user kubernetes -- uvx janus-mcp-server serve
 ```
 
 Start a new session and check `/mcp`. Note: Claude Code does not currently
@@ -67,8 +76,8 @@ render elicitation, so write approvals use `janus-mcp approve <id>` (see step 4)
 {
   "mcpServers": {
     "kubernetes": {
-      "command": "uv",
-      "args": ["--directory", "/Users/me/git/janus-mcp", "run", "janus-mcp", "serve"]
+      "command": "uvx",
+      "args": ["janus-mcp-server", "serve"]
     }
   }
 }
@@ -87,8 +96,8 @@ command palette):
   "servers": {
     "kubernetes": {
       "type": "stdio",
-      "command": "uv",
-      "args": ["--directory", "/Users/me/git/janus-mcp", "run", "janus-mcp", "serve"]
+      "command": "uvx",
+      "args": ["janus-mcp-server", "serve"]
     }
   }
 }
@@ -100,8 +109,8 @@ command palette):
 
 ```toml
 [mcp_servers.kubernetes]
-command = "uv"
-args = ["--directory", "/Users/me/git/janus-mcp", "run", "janus-mcp", "serve"]
+command = "uvx"
+args = ["janus-mcp-server", "serve"]
 ```
 
 ### Cursor
@@ -112,8 +121,8 @@ args = ["--directory", "/Users/me/git/janus-mcp", "run", "janus-mcp", "serve"]
 {
   "mcpServers": {
     "kubernetes": {
-      "command": "uv",
-      "args": ["--directory", "/Users/me/git/janus-mcp", "run", "janus-mcp", "serve"]
+      "command": "uvx",
+      "args": ["janus-mcp-server", "serve"]
     }
   }
 }
