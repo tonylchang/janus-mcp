@@ -1,0 +1,51 @@
+name: ci
+
+# Triggers are deliberately conservative to preserve Actions minutes on the
+# private repo: PRs and manual dispatch only (plus the release workflow, which
+# runs the same gate on tags). Once the repo is public, Actions are free —
+# consider re-adding `push: branches: [main]` and a 3.13 matrix entry then.
+#
+# Actions are pinned by commit SHA (the tag comment is informational): the
+# actions themselves are part of the supply chain.
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.12"
+      - run: uv sync
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      # Includes the security suite: adversarial probes, approval bait-and-switch,
+      # and the frame-capture leak test (canaries in any MCP frame fail the build).
+      - run: uv run pytest -q
+      # Dependency audit against the OSV database: fails on known-vulnerable
+      # (or known-compromised) versions of anything pinned in uv.lock.
+      - name: audit dependencies (OSV)
+        uses: google/osv-scanner-action/osv-scanner-action@9a498708959aeaef5ef730655706c5a1df1edbc2 # v2.3.8
+        with:
+          scan-args: |-
+            --lockfile=uv.lock
+
+  kind-integration:
+    runs-on: ubuntu-latest
+    # Heavy (spins up a real cluster); run manually from the Actions tab.
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          python-version: "3.12"
+      - uses: helm/kind-action@ef37e7f390d99f746eb8b610417061a60e82a6cc # v1.14.0
+        with:
+          cluster_name: janus-test
+      - run: uv sync
+      - run: JANUS_KIND_TEST=1 JANUS_KIND_CONTEXT=kind-janus-test uv run pytest tests/integration -m integration -q

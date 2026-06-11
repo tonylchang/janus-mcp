@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "janus-mcp"
+version = "0.1.0"
+description = "Secure Kubernetes MCP server: redacted diagnostics and human-approved writes, credentials never leave the process."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Tony Chang" }]
+keywords = ["mcp", "kubernetes", "llm", "security"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Security",
+]
+dependencies = [
+    "mcp>=1.16,<2",
+    "kubernetes>=31,<34",
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.4,<3",
+    "cachetools>=5.3,<7",
+    "PyYAML>=6.0,<7",
+    "structlog>=24,<26",
+]
+
+[project.urls]
+Homepage = "https://github.com/tonylchang/janus-mcp"
+Issues = "https://github.com/tonylchang/janus-mcp/issues"
+Security = "https://github.com/tonylchang/janus-mcp/security/policy"
+
+[project.scripts]
+janus-mcp = "janus_mcp.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "anyio>=4",
+    "hypothesis>=6.100",
+    "ruff>=0.6",
+    "mypy>=1.11",
+    "types-PyYAML",
+    "types-cachetools",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/janus_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["tests"]
+addopts = "-q"
+markers = [
+    "integration: requires a live kind cluster (set JANUS_KIND_TEST=1)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "RUF"]
+ignore = ["S101"]  # asserts are fine; tests rely on them
+allowed-confusables = ["×"]  # event dedup marker (×N) is deliberate
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "B017"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src/janus_mcp"]
+
+[[tool.mypy.overrides]]
+module = ["kubernetes.*", "cachetools.*"]
+ignore_missing_imports = true

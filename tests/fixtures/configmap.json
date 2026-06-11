@@ -1,0 +1,22 @@
+{
+  "kind": "ConfigMap",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "payments-config",
+    "namespace": "prod",
+    "uid": "cm111111-2222-3333-4444-555566667777",
+    "resourceVersion": "880022",
+    "creationTimestamp": "2026-03-01T10:00:00Z",
+    "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"data\":{\"database.url\":\"postgres://app:CanaryCmPw99@db.prod.svc:5432/app\"}}"
+    }
+  },
+  "data": {
+    "database.url": "postgres://app:CanaryCmPw99@db.prod.svc:5432/app",
+    "log_level": "info",
+    "feature_flags": "checkout_v2=true,fast_refunds=false"
+  },
+  "binaryData": {
+    "keystore.p12": "bWFnaWMtY2FuYXJ5LWtleXN0b3JlLWJ5dGVzCg=="
+  }
+}

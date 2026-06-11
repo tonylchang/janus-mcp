@@ -1,0 +1,67 @@
+[
+  {
+    "kind": "Event",
+    "apiVersion": "v1",
+    "metadata": {"name": "payments-api-7f9c6d4b-xkq2p.17a1", "namespace": "prod"},
+    "involvedObject": {"kind": "Pod", "name": "payments-api-7f9c6d4b-xkq2p", "namespace": "prod"},
+    "reason": "BackOff",
+    "message": "Back-off restarting failed container payments-api in pod payments-api-7f9c6d4b-xkq2p",
+    "type": "Warning",
+    "count": 9,
+    "firstTimestamp": "2026-06-10T05:00:00Z",
+    "lastTimestamp": "2026-06-10T08:05:00Z",
+    "source": {"component": "kubelet", "host": "ip-10-0-1-23.ec2.internal"}
+  },
+  {
+    "kind": "Event",
+    "apiVersion": "v1",
+    "metadata": {"name": "payments-api-7f9c6d4b-xkq2p.17a2", "namespace": "prod"},
+    "involvedObject": {"kind": "Pod", "name": "payments-api-7f9c6d4b-xkq2p", "namespace": "prod"},
+    "reason": "BackOff",
+    "message": "Back-off restarting failed container payments-api in pod payments-api-7f9c6d4b-xkq2p",
+    "type": "Warning",
+    "count": 8,
+    "firstTimestamp": "2026-06-10T05:00:00Z",
+    "lastTimestamp": "2026-06-10T08:03:00Z",
+    "source": {"component": "kubelet", "host": "ip-10-0-1-23.ec2.internal"}
+  },
+  {
+    "kind": "Event",
+    "apiVersion": "v1",
+    "metadata": {"name": "payments-api-7f9c6d4b-xkq2p.17a3", "namespace": "prod"},
+    "involvedObject": {"kind": "Pod", "name": "payments-api-7f9c6d4b-xkq2p", "namespace": "prod"},
+    "reason": "Unhealthy",
+    "message": "Liveness probe failed: Get \"http://10.244.1.5:8080/healthz\": dial tcp 10.244.1.5:8080: connect: connection refused",
+    "type": "Warning",
+    "count": 9,
+    "firstTimestamp": "2026-06-10T07:00:00Z",
+    "lastTimestamp": "2026-06-10T07:56:00Z",
+    "source": {"component": "kubelet", "host": "ip-10-0-1-23.ec2.internal"}
+  },
+  {
+    "kind": "Event",
+    "apiVersion": "v1",
+    "metadata": {"name": "payments-api-7f9c6d4b-xkq2p.17a4", "namespace": "prod"},
+    "involvedObject": {"kind": "Pod", "name": "payments-api-7f9c6d4b-xkq2p", "namespace": "prod"},
+    "reason": "Failed",
+    "message": "Error: couldn't connect with password=Tr0ub4dor&3-canary to upstream at 203.0.113.99",
+    "type": "Warning",
+    "count": 1,
+    "firstTimestamp": "2026-06-10T07:30:00Z",
+    "lastTimestamp": "2026-06-10T07:30:00Z",
+    "source": {"component": "kubelet", "host": "ip-10-0-1-23.ec2.internal"}
+  },
+  {
+    "kind": "Event",
+    "apiVersion": "v1",
+    "metadata": {"name": "checkout-6cf54d9f8d-b2xtl.17b1", "namespace": "prod"},
+    "involvedObject": {"kind": "Pod", "name": "checkout-6cf54d9f8d-b2xtl", "namespace": "prod"},
+    "reason": "Pulled",
+    "message": "Container image \"registry.local/checkout:1.9.0\" already present on machine",
+    "type": "Normal",
+    "count": 1,
+    "firstTimestamp": "2026-06-10T07:45:00Z",
+    "lastTimestamp": "2026-06-10T07:45:00Z",
+    "source": {"component": "kubelet", "host": "ip-10-0-1-24.ec2.internal"}
+  }
+]

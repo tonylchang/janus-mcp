@@ -1,0 +1,5 @@
+NAME                         READY  STATUS            RESTARTS  AGE   LAST_STATE
+payments-api-7f9c6d4b-xkq2p  0/1    CrashLoopBackOff  17        3d2h  Error: exit 1 (3m ago)
+payments-api-7f9c6d4b-mm1qz  0/1    CrashLoopBackOff  16        3d2h  Error: exit 1 (3m ago)
+checkout-6cf54d9f8d-b2xtl    1/1    Running           0         12d   -
+redis-0                      1/1    Running           0         31d   -
