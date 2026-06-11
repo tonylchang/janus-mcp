@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "janus-mcp"
+name = "janus-mcp-server"
 version = "0.1.0"
 description = "Secure Kubernetes MCP server: redacted diagnostics and human-approved writes, credentials never leave the process."
 readme = "README.md"

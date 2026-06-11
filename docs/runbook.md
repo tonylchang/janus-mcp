@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-uv tool install janus-mcp        # or: pipx install janus-mcp
+uv tool install janus-mcp-server        # or: pipx install janus-mcp-server
 # from a checkout:
 uv sync
 ```
