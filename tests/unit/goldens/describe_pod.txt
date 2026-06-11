@@ -1,0 +1,90 @@
+kind: Pod
+apiVersion: v1
+metadata:
+  name: payments-api-7f9c6d4b-xkq2p
+  namespace: prod
+  creationTimestamp: '2026-06-07T06:00:00Z'
+  labels:
+    app: payments-api
+    pod-template-hash: 7f9c6d4b
+  annotations:
+    prometheus.io/scrape: 'true'
+    checksum/config: a1b2c3d4
+  ownerReferences:
+  - kind: ReplicaSet
+    name: payments-api-7f9c6d4b
+spec:
+  containers:
+  - name: payments-api
+    image: registry.local/payments-api:2.4.1
+    env:
+    - name: DB_USER
+      value: '[REDACTED:env-value]'
+    - name: DB_PASSWORD
+      value: '[REDACTED:env-value]'
+    - name: API_TOKEN
+      value: '[REDACTED:env-value]'
+    - name: DB_URL
+      valueFrom: secretKeyRef(db-credentials/url)
+    - name: POD_NAME
+      valueFrom: fieldRef(metadata.name)
+    envFrom:
+    - secretRef(payments-env)
+    - configMapRef(payments-config)
+    ports:
+    - containerPort: 8080
+      protocol: TCP
+    volumeMounts:
+    - name: db-creds
+      mountPath: /var/secrets
+    - name: sa-token
+      mountPath: /var/run/secrets/tokens
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+      periodSeconds: 10
+  volumes:
+  - name: db-creds
+    secret:
+      secretName: db-credentials
+  - name: sa-token
+    projected:
+      sources:
+      - serviceAccountToken(serviceAccountToken)
+      - configMap(ca-bundle)
+  imagePullSecrets:
+  - regcred
+  nodeName: '[MASKED:node]'
+  serviceAccountName: payments
+  tolerations:
+  - key: node.kubernetes.io/not-ready
+    operator: Exists
+    effect: NoExecute
+    tolerationSeconds: 300
+status:
+  phase: Running
+  conditions:
+  - type: Ready
+    status: 'False'
+    reason: ContainersNotReady
+    message: 'containers with unready status: [payments-api]'
+  hostIP: '[MASKED:node]'
+  podIP: 10.244.1.5
+  startTime: '2026-06-07T06:00:05Z'
+  containerStatuses:
+  - name: payments-api
+    ready: false
+    restartCount: 17
+    image: registry.local/payments-api:2.4.1
+    imageID: registry.local/payments-api@sha256:9b6f1e0a4c1d2e3f45567890abcdef0123456789abcdef0123456789abcdef01
+    state:
+      waiting:
+        reason: CrashLoopBackOff
+        message: back-off 5m0s restarting failed container
+    lastState:
+      terminated:
+        exitCode: 1
+        reason: Error
+        startedAt: '2026-06-10T07:59:00Z'
+        finishedAt: '2026-06-10T08:01:13Z'

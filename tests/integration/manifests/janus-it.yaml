@@ -1,0 +1,51 @@
+# Fixtures for the kind-based integration suite. Canary credentials are
+# planted in a Secret, a ConfigMap, and a crash-looping pod's stdout; the
+# tests assert none of them ever cross the MCP boundary.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: janus-it
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: janus-canary
+  namespace: janus-it
+type: Opaque
+stringData:
+  password: "Tr0ub4dor&3-canary"
+  aws_key: "AKIAIOSFODNN7CANARY1"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: janus-it-config
+  namespace: janus-it
+data:
+  database.url: "postgres://app:CanaryCmPw99@db.janus-it.svc:5432/app"
+  log_level: "info"
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: janus-it-crashloop
+  namespace: janus-it
+  labels:
+    app: janus-it-crashloop
+spec:
+  restartPolicy: Always
+  containers:
+    - name: leaky
+      image: busybox:1.36
+      env:
+        - name: FAKE_PASSWORD
+          value: "Tr0ub4dor&3-canary"
+      command:
+        - /bin/sh
+        - -c
+        - >
+          echo "INFO starting leaky app";
+          echo "DEBUG aws key AKIAIOSFODNN7CANARY1 loaded";
+          echo "DEBUG auth header: Bearer eyJhbGciOiJIUzI1NiJ9.eyJjYW5hcnkiOnRydWV9.czNjcjN0LXNpZ25hdHVyZQ";
+          echo "FATAL boom";
+          exit 1

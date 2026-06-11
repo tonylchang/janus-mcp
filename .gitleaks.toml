@@ -1,0 +1,19 @@
+# gitleaks configuration.
+#
+# The test suite deliberately plants CANARY credentials (fake AWS keys, JWTs,
+# GitHub tokens, passwords) in fixtures. They are the point of the tests: the
+# security suite fails the build if any of them ever crosses the MCP boundary
+# (see tests/security/test_frame_capture.py and tests/fixtures/README.md).
+# None of them are, or ever were, real credentials.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Planted canary credentials used by the redaction test suite"
+paths = [
+    '''tests/fixtures/.*''',
+    '''tests/support\.py''',
+    '''tests/unit/goldens/.*''',
+    '''tests/integration/manifests/.*''',
+]

@@ -1,0 +1,33 @@
+kind: Node
+apiVersion: v1
+metadata:
+  name: ip-10-0-1-23.ec2.internal
+  creationTimestamp: '2026-01-15T00:00:00Z'
+  labels:
+    kubernetes.io/hostname: ip-10-0-1-23.ec2.internal
+    kubernetes.io/os: linux
+    node.kubernetes.io/instance-type: m6i.large
+    topology.kubernetes.io/zone: us-east-1a
+    eks.amazonaws.com/nodegroup: '[MASKED]'
+    alpha.eksctl.io/cluster-name: '[MASKED]'
+spec:
+  providerID: '[MASKED:provider-id]'
+  podCIDR: 10.244.1.0/24
+status:
+  addresses:
+  - type: InternalIP
+    address: 10.0.1.23
+  - type: ExternalIP
+    address: '[REDACTED:ip]'
+  - type: Hostname
+    address: '[MASKED:node]'
+  conditions:
+  - type: Ready
+    status: 'True'
+    reason: KubeletReady
+    message: kubelet is posting ready status
+  nodeInfo:
+    kernelVersion: 6.1.0-aws
+    osImage: Amazon Linux 2023
+    kubeletVersion: v1.31.4-eks-abc1234
+    containerRuntimeVersion: containerd://1.7.11

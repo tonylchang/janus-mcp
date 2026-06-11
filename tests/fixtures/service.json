@@ -1,0 +1,29 @@
+{
+  "kind": "Service",
+  "apiVersion": "v1",
+  "metadata": {
+    "name": "payments-api",
+    "namespace": "prod",
+    "uid": "svc11111-2222-3333-4444-555566667777",
+    "resourceVersion": "770033",
+    "creationTimestamp": "2026-03-01T10:00:00Z",
+    "annotations": {
+      "service.beta.kubernetes.io/aws-load-balancer-ssl-cert": "arn:aws:acm:us-east-1:123456789012:certificate/abc",
+      "external-dns.alpha.kubernetes.io/hostname": "payments.example.com",
+      "my-vendor.io/api-key": "vendor-api-key-canary-000111",
+      "prometheus.io/port": "9100"
+    }
+  },
+  "spec": {
+    "type": "LoadBalancer",
+    "clusterIP": "10.96.14.7",
+    "externalIPs": ["203.0.113.50"],
+    "ports": [{"name": "http", "port": 80, "targetPort": 8080, "protocol": "TCP"}],
+    "selector": {"app": "payments-api"}
+  },
+  "status": {
+    "loadBalancer": {
+      "ingress": [{"ip": "203.0.113.80"}]
+    }
+  }
+}

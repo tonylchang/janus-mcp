@@ -1,0 +1,4 @@
+0s   Warning  BackOff    pod/payments-api-7f9c6d4b-xkq2p  Back-off restarting failed container payments-api in pod payments-api-7f9c6d4b-xkq2p                                ×17
+9m   Warning  Unhealthy  pod/payments-api-7f9c6d4b-xkq2p  Liveness probe failed: Get "http://10.244.1.5:8080/healthz": dial tcp 10.244.1.5:8080: connect: connection refused  ×9
+35m  Warning  Failed     pod/payments-api-7f9c6d4b-xkq2p  Error: couldn't connect with password=[REDACTED] to upstream at [REDACTED:ip]
+20m  Normal   Pulled     pod/checkout-6cf54d9f8d-b2xtl    Container image "registry.local/checkout:1.9.0" already present on machine

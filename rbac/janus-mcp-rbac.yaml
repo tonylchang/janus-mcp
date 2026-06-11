@@ -1,0 +1,109 @@
+# Least-privilege RBAC for janus-mcp.
+#
+# Run the server with a kubeconfig bound to this ServiceAccount — never
+# cluster-admin. Note what is absent: secrets. Nowhere. Ever.
+#
+# Apply, then repeat the Role + RoleBinding per allowed namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: janus-mcp
+  namespace: janus-mcp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: janus-mcp-namespace-read
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: janus-mcp-namespace-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: janus-mcp-namespace-read
+subjects:
+  - kind: ServiceAccount
+    name: janus-mcp
+    namespace: janus-mcp
+---
+# Repeat this Role + RoleBinding for every namespace in scope.allowed_namespaces.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: janus-mcp
+  namespace: prod
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - events
+      - services
+      - configmaps
+      - persistentvolumeclaims
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list"]
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list"]
+  - apiGroups: ["events.k8s.io"]
+    resources: ["events"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: janus-mcp
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: janus-mcp
+subjects:
+  - kind: ServiceAccount
+    name: janus-mcp
+    namespace: janus-mcp
+---
+# ONLY apply this Role if write tools are enabled in the janus-mcp config.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: janus-mcp-write
+  namespace: prod
+rules:
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+      - statefulsets
+      - statefulsets/scale
+      - daemonsets
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: janus-mcp-write
+  namespace: prod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: janus-mcp-write
+subjects:
+  - kind: ServiceAccount
+    name: janus-mcp
+    namespace: janus-mcp

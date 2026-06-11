@@ -1,0 +1,26 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: payments-api
+  namespace: prod
+  creationTimestamp: '2026-03-01T10:00:00Z'
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-ssl-cert: arn:aws:acm:us-east-1:123456789012:certificate/abc
+    external-dns.alpha.kubernetes.io/hostname: payments.example.com
+    prometheus.io/port: '9100'
+spec:
+  type: LoadBalancer
+  clusterIP: 10.96.14.7
+  externalIPs:
+  - '[REDACTED:ip]'
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+    protocol: TCP
+  selector:
+    app: payments-api
+status:
+  loadBalancer:
+    ingress:
+    - ip: '[REDACTED:ip]'

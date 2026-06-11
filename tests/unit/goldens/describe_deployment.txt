@@ -1,0 +1,54 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: payments-api
+  namespace: prod
+  generation: 14
+  creationTimestamp: '2026-03-01T10:00:00Z'
+  labels:
+    app: payments-api
+    team: payments
+  annotations:
+    deployment.kubernetes.io/revision: '14'
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payments-api
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+  template:
+    metadata:
+      labels:
+        app: payments-api
+      annotations:
+        kubectl.kubernetes.io/restartedAt: '2026-06-07T06:00:00Z'
+    spec:
+      containers:
+      - name: payments-api
+        image: registry.local/payments-api:2.4.1
+        env:
+        - name: DB_USER
+          value: '[REDACTED:env-value]'
+        - name: DB_PASSWORD
+          value: '[REDACTED:env-value]'
+        - name: DB_URL
+          valueFrom: secretKeyRef(db-credentials/url)
+        envFrom:
+        - secretRef(payments-env)
+      imagePullSecrets:
+      - regcred
+status:
+  observedGeneration: 14
+  replicas: 2
+  updatedReplicas: 2
+  readyReplicas: 0
+  unavailableReplicas: 2
+  conditions:
+  - type: Available
+    status: 'False'
+    reason: MinimumReplicasUnavailable
+    message: Deployment does not have minimum availability.

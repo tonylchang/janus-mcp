@@ -1,0 +1,43 @@
+# janus-mcp configuration — operator-authoritative policy.
+# Copy to ~/.config/janus-mcp/config.yaml and adjust.
+
+# The server REFUSES to start on any other kubeconfig context. Use a dedicated
+# least-privilege ServiceAccount context (see rbac/), never cluster-admin.
+context: limited-sa@prod-cluster
+
+# kubeconfig: ~/.kube/config        # optional; defaults to the standard location
+
+scope:
+  allowed_namespaces: ["prod", "staging"]
+  denied_namespaces: ["kube-system", "kube-node-lease"]   # deny wins
+  allow_cluster_scoped: false       # blocks describe_resource kind=Node, node lists
+
+# Global kill switch: true removes write tools from tools/list entirely.
+read_only: false
+
+write_tools:
+  enabled: ["rollout_restart", "scale_deployment"]   # empty list = no write tools
+  max_replicas: 20
+  allow_scale_to_zero: false
+  approval_timeout_seconds: 120
+
+limits:
+  log_tail_max: 500
+  result_max_bytes: 65536
+  rate_per_minute:
+    default: 30
+    get_logs: 5
+    write: 3
+  api_timeout_seconds: 10
+  tool_budget_seconds: 30
+
+redaction:
+  mask_node_names: true
+  mask_external_ips: true
+  entropy_threshold: 4.5
+  configmap_values: mask            # mask | allowlist
+  configmap_key_allowlist: []       # used only with configmap_values: allowlist
+  annotation_allowlist: []          # annotations exempted from the sensitive-pattern denylist
+
+audit_log: ~/.local/state/janus-mcp/audit.jsonl
+approvals_dir: ~/.local/state/janus-mcp/approvals
