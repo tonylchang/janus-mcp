@@ -10,8 +10,8 @@ git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
 uv sync
 ```
 
-(Once published to PyPI, this becomes `uv tool install janus-mcp` and every
-`uv --directory … run janus-mcp` below becomes just `uvx janus-mcp`.)
+(Once published to PyPI, this becomes `uv tool install janus-mcp-server` and every
+`uv --directory … run janus-mcp` below becomes just `uvx janus-mcp-server`.)
 
 ## 2. Configure
 
