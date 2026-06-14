@@ -88,6 +88,9 @@ Janus will fetch the relevant information, sanitise it, and the LLM will walk yo
 
 - [Operator runbook](docs/runbook.md) — install, least-privilege RBAC, approvals, audit log, troubleshooting
 - [Threat model](docs/threat-model.md) — the five security invariants and how CI verifies them
+- [Bounded remediation](docs/bounded-remediation.md) — current and candidate write tools, with guardrails
+- [Security comparison](docs/security-comparison.md) — how Janus differs from broad Kubernetes MCP servers
+- [Release security checklist](docs/release-security.md) — tests, provenance, and distribution hardening
 - [`rbac/`](rbac/janus-mcp-rbac.yaml) — least-privilege manifests (note what is absent: secrets — nowhere, ever)
 
 Janus is currently in active development.
