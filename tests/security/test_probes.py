@@ -143,6 +143,8 @@ async def test_read_only_config_hides_write_tools(tmp_path) -> None:
         tools = [t.name for t in (await client.list_tools()).tools]
     assert "scale_deployment" not in tools
     assert "rollout_restart" not in tools
+    assert "pause_rollout" not in tools
+    assert "resume_rollout" not in tools
     assert "get_pods" in tools
 
 
@@ -168,5 +170,101 @@ async def test_cluster_summary_resource_is_listed_and_sanitized(server) -> None:
         text = result.contents[0].text
     assert "namespaces in scope: prod, staging" in text
     assert "pods by phase:" in text
+    for canary in support.ALL_CANARIES:
+        assert canary not in text
+
+
+async def test_list_namespaces_falls_back_to_individual_fetches(tmp_path) -> None:
+    class NamespaceFallbackKube(FakeKube):
+        async def list_namespaces(self):
+            self._record("list_namespaces")
+            from janus_mcp.kube import KubeError
+
+            raise KubeError("RBAC denied: namespaces")
+
+    settings = make_settings(tmp_path)
+    kube = NamespaceFallbackKube()
+    server = build_server(settings, kube, make_audit(settings))
+
+    result = await _call(server, "list_namespaces", {})
+    assert not result.isError
+    text = result.content[0].text
+    assert "prod" in text
+    assert "staging" in text
+    assert len(kube.calls_for("get_namespace")) == 2
+
+
+async def test_cluster_summary_fallback_paths(tmp_path) -> None:
+    class SummaryFallbackKube(FakeKube):
+        async def server_version(self):
+            self._record("server_version")
+            from janus_mcp.kube import KubeError
+
+            raise KubeError("version unavailable")
+
+        async def list_nodes(self):
+            self._record("list_nodes")
+            from janus_mcp.kube import KubeError
+
+            raise KubeError("nodes unavailable")
+
+        async def list_pods(self, namespace, label_selector, field_selector, limit):
+            self._record(
+                "list_pods",
+                namespace=namespace,
+                label_selector=label_selector,
+                field_selector=field_selector,
+                limit=limit,
+            )
+            if namespace == "prod":
+                from janus_mcp.kube import KubeError
+
+                raise KubeError("pods unavailable")
+            return []
+
+    settings = make_settings(
+        tmp_path,
+        scope={
+            "allowed_namespaces": ["prod", "staging"],
+            "denied_namespaces": ["kube-system"],
+            "allow_cluster_scoped": True,
+        },
+    )
+    server = build_server(settings, SummaryFallbackKube(), make_audit(settings))
+
+    result = await _call(server, "get_cluster_summary", {})
+    assert not result.isError
+    text = result.content[0].text
+    assert "server version: unavailable" in text
+    assert "nodes: unavailable" in text
+    assert "pods by phase: none found" in text
+
+
+async def test_cluster_scoped_describe_resource_allowed_when_enabled(tmp_path) -> None:
+    class ClusterNodeKube(FakeKube):
+        async def get_object(self, kind: str, name: str, namespace: str | None):
+            if kind == "Node" and name == "worker-a":
+                node = support.load_fixture("node.json")
+                node["metadata"]["name"] = "worker-a"
+                self._record("get_object", kind=kind, name=name, namespace=namespace)
+                return node
+            return await super().get_object(kind, name, namespace)
+
+    settings = make_settings(
+        tmp_path,
+        scope={
+            "allowed_namespaces": ["prod", "staging"],
+            "denied_namespaces": ["kube-system"],
+            "allow_cluster_scoped": True,
+        },
+    )
+    kube = ClusterNodeKube()
+    server = build_server(settings, kube, make_audit(settings))
+
+    result = await _call(server, "describe_resource", {"kind": "Node", "name": "worker-a"})
+    assert not result.isError
+    text = result.content[0].text
+    assert "kind: Node" in text
+    assert "[MASKED:node]" in text
     for canary in support.ALL_CANARIES:
         assert canary not in text

@@ -20,7 +20,7 @@ import structlog
 
 from .audit import AuditLog
 from .config import Settings, load_settings
-from .policy import ApprovalStore
+from .policy import APPROVAL_STORE_TTL_FACTOR, ApprovalStore, ScopeGuard
 
 log = structlog.get_logger("janus_mcp.cli")
 
@@ -35,7 +35,7 @@ def _configure_logging() -> None:
 def _store(settings: Settings) -> ApprovalStore:
     return ApprovalStore(
         settings.approvals_dir,
-        ttl_seconds=settings.write_tools.approval_timeout_seconds * 2.5,
+        ttl_seconds=settings.write_tools.approval_timeout_seconds * APPROVAL_STORE_TTL_FACTOR,
     )
 
 
@@ -45,10 +45,9 @@ def serve(settings: Settings, strict: bool) -> int:
 
     kube = KubeClient(settings)  # loads the kubeconfig HERE, pinned context
 
-    in_scope = [
-        ns for ns in settings.scope.allowed_namespaces if ns not in settings.scope.denied_namespaces
-    ]
-    missing, overprivileged = kube.self_check(in_scope, settings.writes_enabled())
+    in_scope = ScopeGuard(settings.scope).namespaces()
+    enabled_write_tools = [] if settings.read_only else settings.write_tools.enabled
+    missing, overprivileged = kube.self_check(in_scope, enabled_write_tools)
     for warning in overprivileged:
         log.warning("overprivileged_credentials", detail=warning)
     if missing:

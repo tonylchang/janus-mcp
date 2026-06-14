@@ -6,6 +6,7 @@ suite is simple: no canary value may ever appear in anything the model sees.
 
 from __future__ import annotations
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -68,7 +69,12 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         },
         "read_only": False,
         "write_tools": {
-            "enabled": ["rollout_restart", "scale_deployment"],
+            "enabled": [
+                "rollout_restart",
+                "scale_deployment",
+                "pause_rollout",
+                "resume_rollout",
+            ],
             "max_replicas": 20,
             "allow_scale_to_zero": False,
             "approval_timeout_seconds": 0.5,
@@ -106,6 +112,7 @@ class FakeKube:
             ready_replicas=2,
             resource_version="12345",
         )
+        self.deployment = load_fixture("deployment.json")
 
     def _record(self, method: str, **kwargs: Any) -> None:
         self.calls.append((method, kwargs))
@@ -161,14 +168,16 @@ class FakeKube:
         self._record("get_object", kind=kind, name=name, namespace=namespace)
         fixture_by_kind = {
             "Pod": "pod.json",
-            "Deployment": "deployment.json",
             "ConfigMap": "configmap.json",
             "Service": "service.json",
             "Node": "node.json",
         }
-        if kind not in fixture_by_kind:
+        if kind == "Deployment":
+            obj = copy.deepcopy(self.deployment)
+        elif kind in fixture_by_kind:
+            obj = load_fixture(fixture_by_kind[kind])
+        else:
             raise KubeError(f"not found: {kind} {name}")
-        obj = load_fixture(fixture_by_kind[kind])
         if name != obj["metadata"]["name"]:
             raise KubeError(f"not found: {kind} {namespace}/{name}")
         return dict(obj)
@@ -244,10 +253,35 @@ class FakeKube:
         self, kind: str, name: str, namespace: str, reason: str
     ) -> dict[str, Any]:
         self._record("rollout_restart", kind=kind, name=name, namespace=namespace, reason=reason)
-        result = dict(load_fixture("deployment.json"))
+        result = copy.deepcopy(self.deployment)
         result["metadata"] = dict(result["metadata"])
         result["metadata"]["generation"] = 15
         return result
+
+    async def set_deployment_paused(
+        self,
+        name: str,
+        namespace: str,
+        paused: bool,
+        expected_resource_version: str,
+    ) -> dict[str, Any]:
+        self._record(
+            "set_deployment_paused",
+            name=name,
+            namespace=namespace,
+            paused=paused,
+            expected_resource_version=expected_resource_version,
+        )
+        meta = self.deployment["metadata"]
+        if name != meta["name"] or namespace != meta["namespace"]:
+            raise KubeError(f"not found: Deployment {namespace}/{name}")
+        if expected_resource_version != meta["resourceVersion"]:
+            raise KubeError("conflict: Deployment changed since it was read; re-read and retry")
+        self.deployment = copy.deepcopy(self.deployment)
+        self.deployment.setdefault("spec", {})["paused"] = paused
+        self.deployment["metadata"] = dict(self.deployment["metadata"])
+        self.deployment["metadata"]["resourceVersion"] = str(int(expected_resource_version) + 1)
+        return copy.deepcopy(self.deployment)
 
     def calls_for(self, method: str) -> list[dict[str, Any]]:
         return [kwargs for name, kwargs in self.calls if name == method]

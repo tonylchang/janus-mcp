@@ -90,10 +90,12 @@ _PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # Whitespace is same-line only ([ \t], not \s): a bare YAML map key like
         # "secret:" at end of line must not swallow the next line's key.
         re.compile(
-            r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key"
-            r"|authorization|auth|bearer|credentials?)\b[\"']?([ \t]*[:=][ \t]*)(\S+)"
+            r"(?i)\b((?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key"
+            r"|authorization|auth|bearer|credentials?)\b[\"']?[ \t]*[:=][ \t]*)"
+            r"(\"[^\"\r\n]*\"|'[^'\r\n]*'|[^\r\n,;]+?"
+            r"(?=(?:[ \t]+(?:to|from|at|for|in|with|on)\b)|[\r\n,;]|$))"
         ),
-        r"\1\2[REDACTED]",
+        r"\1[REDACTED]",
     ),
 ]
 
@@ -158,7 +160,10 @@ def _mask_public_ips(text: str, stats: RedactionStats) -> str:
 
 def _entropy_pass(text: str, threshold: float, stats: RedactionStats) -> str:
     out: list[str] = []
-    for token in text.split(" "):
+    for token in re.split(r"(\s+)", text):
+        if token.isspace():
+            out.append(token)
+            continue
         core = token.strip(_TOKEN_TRIM)
         if (
             len(core) >= _ENTROPY_MIN_LEN
@@ -169,7 +174,7 @@ def _entropy_pass(text: str, threshold: float, stats: RedactionStats) -> str:
             out.append(token.replace(core, _typed("high-entropy")))
         else:
             out.append(token)
-    return " ".join(out)
+    return "".join(out)
 
 
 def scrub_text(text: str, settings: RedactionSettings, stats: RedactionStats) -> str:

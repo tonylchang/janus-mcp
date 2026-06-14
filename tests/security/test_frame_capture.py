@@ -72,6 +72,14 @@ async def test_full_session_leaks_nothing(tmp_path) -> None:
             "scale_deployment",
             {"name": "payments-api", "namespace": "prod", "replicas": 4},
         )
+        await client.call_tool(
+            "pause_rollout",
+            {
+                "name": "payments-api",
+                "namespace": "prod",
+                "reason": "hold rollout during frame-capture leak test",
+            },
+        )
         # an error path: out-of-scope namespace
         error_result = await client.call_tool("get_pods", {"namespace": "kube-system"})
         assert error_result.isError

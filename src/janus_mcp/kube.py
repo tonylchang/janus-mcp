@@ -113,6 +113,13 @@ class KubeApi(Protocol):
     async def rollout_restart(
         self, kind: str, name: str, namespace: str, reason: str
     ) -> dict[str, Any]: ...
+    async def set_deployment_paused(
+        self,
+        name: str,
+        namespace: str,
+        paused: bool,
+        expected_resource_version: str,
+    ) -> dict[str, Any]: ...
 
 
 def _map_api_error(exc: Exception, what: str) -> KubeError:
@@ -182,7 +189,14 @@ class KubeClient:
     async def _call(self, what: str, fn: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
         kwargs.setdefault("_request_timeout", self._timeout)
         try:
-            return await anyio.to_thread.run_sync(functools.partial(fn, *args, **kwargs))
+            # Do not abandon Kubernetes client worker threads on outer
+            # cancellation. The client-level _request_timeout is the primary
+            # bound; abandoning a thread would let it keep running after the
+            # model-visible tool call returned.
+            return await anyio.to_thread.run_sync(
+                functools.partial(fn, *args, **kwargs),
+                abandon_on_cancel=False,
+            )
         except Exception as exc:
             raise _map_api_error(exc, what) from None
 
@@ -350,6 +364,26 @@ class KubeClient:
         result = await self._call(what, patcher, name, namespace, body)
         return dict(self._to_dict(result))
 
+    async def set_deployment_paused(
+        self,
+        name: str,
+        namespace: str,
+        paused: bool,
+        expected_resource_version: str,
+    ) -> dict[str, Any]:
+        body = {
+            "metadata": {"resourceVersion": expected_resource_version},
+            "spec": {"paused": paused},
+        }
+        result = await self._call(
+            f"Deployment {namespace}/{name}",
+            self._apps.patch_namespaced_deployment,
+            name,
+            namespace,
+            body,
+        )
+        return dict(self._to_dict(result))
+
     # ---- startup self-check -------------------------------------------------
 
     def _ssar(self, **attrs: Any) -> bool:
@@ -370,20 +404,30 @@ class KubeClient:
             return False
 
     def self_check(
-        self, namespaces: list[str], writes_enabled: bool
+        self, namespaces: list[str], enabled_write_tools: list[str]
     ) -> tuple[list[str], list[str]]:
         """Returns (missing capabilities, over-privilege warnings)."""
         missing: list[str] = []
         overprivileged: list[str] = []
         read_probes = [("pods", "list"), ("events", "list"), ("pods/log", "get")]
+        write_tools = set(enabled_write_tools)
         for ns in namespaces:
             for resource, verb in read_probes:
                 if not self._ssar(namespace=ns, resource=resource, verb=verb):
                     missing.append(f"{verb} {resource} in {ns}")
-            if writes_enabled and not self._ssar(
-                namespace=ns, group="apps", resource="deployments", verb="patch"
-            ):
+            if write_tools.intersection(
+                {"rollout_restart", "pause_rollout", "resume_rollout"}
+            ) and not self._ssar(namespace=ns, group="apps", resource="deployments", verb="patch"):
                 missing.append(f"patch deployments in {ns}")
+            if "rollout_restart" in write_tools:
+                for resource in ("statefulsets", "daemonsets"):
+                    if not self._ssar(namespace=ns, group="apps", resource=resource, verb="patch"):
+                        missing.append(f"patch {resource} in {ns}")
+            if "scale_deployment" in write_tools:
+                for resource in ("deployments/scale", "statefulsets/scale"):
+                    for verb in ("get", "patch"):
+                        if not self._ssar(namespace=ns, group="apps", resource=resource, verb=verb):
+                            missing.append(f"{verb} {resource} in {ns}")
             if self._ssar(namespace=ns, resource="secrets", verb="get"):
                 overprivileged.append(
                     f"credentials can read Secrets in {ns} — janus-mcp never will, but a "

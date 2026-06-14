@@ -192,3 +192,97 @@ async def test_rollout_restart_approved_path(tmp_path) -> None:
     calls = kube.calls_for("rollout_restart")
     assert len(calls) == 1
     assert calls[0]["reason"] == "DB credentials rotated; pick up fixed secret"
+
+
+async def test_pause_rollout_approved_path(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        result = await client.call_tool(
+            "pause_rollout",
+            {
+                "name": "payments-api",
+                "namespace": "prod",
+                "reason": "hold rollout while image pull failures are investigated",
+            },
+        )
+    assert not result.isError
+    assert "paused Deployment rollout prod/payments-api" in result.content[0].text
+    calls = kube.calls_for("set_deployment_paused")
+    assert len(calls) == 1
+    assert calls[0]["paused"] is True
+    assert calls[0]["expected_resource_version"] == "991100"
+
+
+async def test_resume_rollout_approved_path(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    kube.deployment["spec"]["paused"] = True
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        result = await client.call_tool(
+            "resume_rollout",
+            {
+                "name": "payments-api",
+                "namespace": "prod",
+                "reason": "new image passed smoke checks",
+            },
+        )
+    assert not result.isError
+    assert "resumed Deployment rollout prod/payments-api" in result.content[0].text
+    calls = kube.calls_for("set_deployment_paused")
+    assert len(calls) == 1
+    assert calls[0]["paused"] is False
+    assert calls[0]["expected_resource_version"] == "991100"
+
+
+async def test_pause_and_resume_refuse_noop_state_before_approval(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        resume = await client.call_tool(
+            "resume_rollout",
+            {"name": "payments-api", "namespace": "prod", "reason": "resume requested"},
+        )
+        assert resume.isError
+        assert "not paused" in resume.content[0].text
+
+        kube.deployment["spec"]["paused"] = True
+        pause = await client.call_tool(
+            "pause_rollout",
+            {"name": "payments-api", "namespace": "prod", "reason": "pause requested"},
+        )
+        assert pause.isError
+        assert "already paused" in pause.content[0].text
+
+    assert kube.calls_for("set_deployment_paused") == []
+
+
+async def test_pause_rollout_stale_resource_version_conflicts_safely(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+
+    real_get_object = kube.get_object
+
+    async def stale_get_object(kind, name, namespace):
+        obj = await real_get_object(kind, name, namespace)
+        if kind == "Deployment":
+            kube.deployment["metadata"]["resourceVersion"] = "991107"
+        return obj
+
+    kube.get_object = stale_get_object  # type: ignore[method-assign]
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        result = await client.call_tool(
+            "pause_rollout",
+            {
+                "name": "payments-api",
+                "namespace": "prod",
+                "reason": "hold while debugging rollout",
+            },
+        )
+    assert result.isError
+    assert "conflict" in result.content[0].text

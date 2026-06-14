@@ -73,6 +73,13 @@ def test_node_name_and_host_ip_masked() -> None:
     assert "ip-10-0-1-23" not in json.dumps(out)
 
 
+def test_host_ips_list_shape_preserved() -> None:
+    pod = support.load_fixture("pod.json")
+    pod["status"]["hostIPs"] = [{"ip": "10.0.1.23"}, {"ip": "10.0.1.24"}]
+    out = sanitize_object("Pod", pod, RS, RedactionStats())
+    assert out["status"]["hostIPs"] == [{"ip": "[MASKED:node]"}, {"ip": "[MASKED:node]"}]
+
+
 def test_node_name_kept_when_masking_disabled() -> None:
     rs = RedactionSettings(mask_node_names=False)
     out = sanitize("Pod", "pod.json", rs)

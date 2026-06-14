@@ -13,9 +13,17 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_CONFIG_PATH = Path("~/.config/janus-mcp/config.yaml")
+WRITE_TOOL_NAMES = frozenset(
+    {
+        "rollout_restart",
+        "scale_deployment",
+        "pause_rollout",
+        "resume_rollout",
+    }
+)
 
 
 class StrictModel(BaseModel):
@@ -47,6 +55,15 @@ class WriteToolsSettings(StrictModel):
     max_replicas: int = Field(default=20, ge=1)
     allow_scale_to_zero: bool = False
     approval_timeout_seconds: float = Field(default=120.0, gt=0)
+
+    @field_validator("enabled")
+    @classmethod
+    def known_tools_only(cls, enabled: list[str]) -> list[str]:
+        unknown = sorted(set(enabled) - WRITE_TOOL_NAMES)
+        if unknown:
+            allowed = ", ".join(sorted(WRITE_TOOL_NAMES))
+            raise ValueError(f"unknown write tool(s): {', '.join(unknown)}; allowed: {allowed}")
+        return enabled
 
 
 class RedactionSettings(StrictModel):

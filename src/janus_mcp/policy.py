@@ -23,6 +23,10 @@ from pydantic import BaseModel
 
 from .config import ScopeSettings, WriteToolsSettings
 
+# Keep out-of-band approvals around longer than the in-client elicitation
+# timeout so a human has time to switch terminals, inspect, approve, and retry.
+APPROVAL_STORE_TTL_FACTOR = 2.5
+
 
 class ScopeGuard:
     """Namespace and cluster-scope policy. Deny wins over allow."""

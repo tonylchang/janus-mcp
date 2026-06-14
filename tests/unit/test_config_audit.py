@@ -41,6 +41,18 @@ def test_context_required(tmp_path) -> None:
         load_settings(path)
 
 
+def test_unknown_write_tool_rejected(tmp_path) -> None:
+    config = {
+        "context": "x",
+        "scope": {"allowed_namespaces": ["prod"]},
+        "write_tools": {"enabled": ["kubectl_apply"]},
+    }
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump(config))
+    with pytest.raises(ValidationError, match="unknown write tool"):
+        load_settings(path)
+
+
 def test_writes_enabled_logic(tmp_path) -> None:
     assert make_settings(tmp_path).writes_enabled()
     assert not make_settings(tmp_path, read_only=True).writes_enabled()
@@ -61,6 +73,17 @@ def test_audit_records_are_json_lines(tmp_path) -> None:
     assert first["redactions"] == 2
     assert "ts" in first
     assert second["event"] == "write_denied"
+
+
+@pytest.mark.anyio
+async def test_async_audit_records_are_json_lines(tmp_path) -> None:
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    await audit.alog_call("get_events", namespace="prod", items=1)
+    lines = (tmp_path / "audit.jsonl").read_text().strip().split("\n")
+    assert len(lines) == 1
+    record = json.loads(lines[0])
+    assert record["event"] == "tool_call"
+    assert record["tool"] == "get_events"
 
 
 def test_audit_rotation(tmp_path) -> None:

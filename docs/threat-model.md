@@ -27,11 +27,13 @@ winning move is to never put secrets there.
    entropy scrubbing of all free text, and output shaping with byte caps.
    Failures fail *closed* — a redaction exception returns a generic error,
    never the payload.
-4. **Writes need out-of-model human approval.** A model-supplied parameter is
-   never consent. Approval arrives via MCP elicitation (client-rendered UI) or
-   the out-of-band CLI (`janus-mcp approve <id>`), which binds a SHA-256 hash
-   of the exact arguments to the approval ID (bait-and-switch prevention) and
-   burns each approval on first use.
+4. **Writes are bounded and need out-of-model human approval.** Janus does not
+   expose generic apply, patch, delete, exec, port-forward, cp, or kubectl.
+   Every write is a named remediation. A model-supplied parameter is never
+   consent. Approval arrives via MCP elicitation (client-rendered UI) or the
+   out-of-band CLI (`janus-mcp approve <id>`), which binds a SHA-256 hash of the
+   exact arguments to the approval ID (bait-and-switch prevention) and burns
+   each approval on first use.
 5. **Scope is enforced server-side on every call**, independent of RBAC:
    namespace allow/deny lists (deny wins), cluster-scope opt-in, kubeconfig
    context pinning, and least-privilege RBAC manifests (`rbac/`) as the second
@@ -45,7 +47,7 @@ winning move is to never put secrets there.
 | `kubectl.kubernetes.io/last-applied-configuration` (embeds full prior object incl. env values) | Dropped unconditionally, never allowlistable |
 | Env values / ConfigMap data / credential-bearing annotations | Structural masking; references (secretKeyRef etc.) shown by name only |
 | Credentials echoed into logs/events by workloads | Pattern + entropy scrubber with typed replacement tokens |
-| Prompt injection via log/event text | Writes always require human approval; untrusted-output framing; static tool descriptions; approval card shows live state + exact change, fetched at approval time |
+| Prompt injection via log/event text | Writes are narrow named remediations and always require human approval; untrusted-output framing; static tool descriptions; approval card shows live state + exact change, fetched at approval time |
 | Approval bait-and-switch (approve A, execute B) | Argument-hash binding; burn-on-use; fresh-read `resourceVersion` carried in the patch, 409 on conflict |
 | Secret-probing via `grep` match counts | grep filters *after* redaction |
 | Error messages leaking the API server URL (urllib3 embeds it) | All client exceptions mapped to typed generic messages; details go to local stderr only |
@@ -57,8 +59,9 @@ winning move is to never put secrets there.
 ## Non-goals (v1)
 
 No `exec`/`attach`/`port-forward`/`cp`; no Secret reads under any
-circumstances; not a general kubectl replacement; single-operator local trust
-domain (stdio transport, no network listener, no multi-tenant auth).
+circumstances; no generic apply/patch/delete; not a general kubectl
+replacement; single-operator local trust domain (stdio transport, no network
+listener, no multi-tenant auth).
 
 ## Residual risks
 

@@ -88,11 +88,14 @@ rules:
   - apiGroups: ["apps"]
     resources:
       - deployments
-      - deployments/scale
       - statefulsets
-      - statefulsets/scale
       - daemonsets
     verbs: ["patch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments/scale
+      - statefulsets/scale
+    verbs: ["get", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

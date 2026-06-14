@@ -140,9 +140,11 @@ Clients that support MCP resources can also pin **`cluster://summary`** into
 context (in Claude Code: type `@` and pick it) — a cached, sanitized one-screen
 health overview the model gets for free, without spending a tool call.
 
-For writes (if enabled in `write_tools.enabled`): the assistant *proposes*;
-you approve. With elicitation-capable clients you get an approval card showing
-live state. With others, the tool returns `status=pending approval_id=…`:
+For bounded remediation (if enabled in `write_tools.enabled`): the assistant
+*proposes*; you approve. Current write tools cover rollout restart, scaling,
+and pausing/resuming a Deployment rollout. With elicitation-capable clients you
+get an approval card showing live state. With others, the tool returns
+`status=pending approval_id=…`:
 
 ```bash
 janus-mcp approvals          # see what's pending

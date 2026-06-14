@@ -16,7 +16,12 @@ scope:
 read_only: false
 
 write_tools:
-  enabled: ["rollout_restart", "scale_deployment"]   # empty list = no write tools
+  # empty list = no write tools; each listed write still needs human approval
+  enabled:
+    - rollout_restart
+    - scale_deployment
+    - pause_rollout
+    - resume_rollout
   max_replicas: 20
   allow_scale_to_zero: false
   approval_timeout_seconds: 120

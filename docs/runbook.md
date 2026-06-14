@@ -59,6 +59,51 @@ janus-mcp approve <id>         # approve one
 Then tell the assistant to re-issue the call with the same arguments. Approvals
 expire (2.5× `approval_timeout_seconds`) and are burned on first use.
 
+Current bounded remediation tools:
+
+| Tool | Effect |
+|---|---|
+| `rollout_restart` | Restart one Deployment, StatefulSet, or DaemonSet rollout |
+| `scale_deployment` | Change replicas for one Deployment or StatefulSet within configured bounds |
+| `pause_rollout` | Set `spec.paused=true` on one Deployment |
+| `resume_rollout` | Set `spec.paused=false` on one Deployment that is already paused |
+
+## Policy profiles
+
+Use these as starting points in `config.yaml`.
+
+Read-only diagnostics:
+
+```yaml
+read_only: true
+write_tools:
+  enabled: []
+```
+
+Diagnose and restart:
+
+```yaml
+read_only: false
+write_tools:
+  enabled: ["rollout_restart"]
+  max_replicas: 20
+  allow_scale_to_zero: false
+```
+
+Controlled remediation:
+
+```yaml
+read_only: false
+write_tools:
+  enabled:
+    - rollout_restart
+    - scale_deployment
+    - pause_rollout
+    - resume_rollout
+  max_replicas: 20
+  allow_scale_to_zero: false
+```
+
 ## Audit
 
 Every call is one JSONL record in `~/.local/state/janus-mcp/audit.jsonl`
@@ -88,6 +133,7 @@ jq 'select(.event=="write_approved")' ~/.local/state/janus-mcp/audit.jsonl
 uv sync
 uv run pytest                          # unit + security suites (no cluster needed)
 uv run pytest tests/security           # the probing + frame-capture leak tests
+uv run pytest tests/security/test_frame_capture.py  # JSON-RPC canary leak harness
 UPDATE_GOLDENS=1 uv run pytest tests/unit/test_goldens.py   # regen, then REVIEW the diff
 uv run ruff check . && uv run ruff format --check . && uv run mypy
 npx @modelcontextprotocol/inspector uv run janus-mcp serve --config <cfg>  # interactive

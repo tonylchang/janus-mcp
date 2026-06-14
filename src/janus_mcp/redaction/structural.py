@@ -185,8 +185,15 @@ def _sanitize_pod_status(
         for key in ("hostIP", "nominatedNodeName"):
             if key in status:
                 status[key] = MASKED_NODE
-        if "hostIPs" in status:
-            status["hostIPs"] = MASKED_NODE
+        host_ips = status.get("hostIPs")
+        if isinstance(host_ips, list):
+            masked: list[Any] = []
+            for entry in host_ips:
+                if isinstance(entry, dict):
+                    masked.append({**entry, "ip": MASKED_NODE})
+                else:
+                    masked.append(MASKED_NODE)
+            status["hostIPs"] = masked
     for cs_section in ("containerStatuses", "initContainerStatuses"):
         statuses = status.get(cs_section)
         if isinstance(statuses, list):

@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="Janus — Kubernetes-native MCP server that protects secrets and blocks leaks to LLMs" width="570">
+  <img src="docs/assets/logo.png" alt="Janus — security-first Kubernetes MCP gateway that protects secrets and blocks leaks to LLMs" width="570">
 </p>
 
 <p align="center">
@@ -10,9 +10,9 @@
 
 ## What is Janus?
 
-Janus is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io) server that gives AI assistants a safe, controlled window into your Kubernetes clusters. It runs locally, holds your `KUBECONFIG` close to its chest, and lets the LLM operate through carefully‑scoped tools — so you get the power of an AI copilot without ever shipping a token, certificate, or API server URL to a third‑party model.
+Janus is a security-first [MCP (Model Context Protocol)](https://modelcontextprotocol.io) gateway for Kubernetes diagnosis and controlled remediation. It runs locally, holds your `KUBECONFIG` close to its chest, and lets the LLM operate through carefully-scoped tools — so you get the power of an AI copilot without ever shipping a token, certificate, or API server URL to a third-party model.
 
-Named after the Roman god of gateways (who famously looks both ways at once), Janus faces the LLM with clean, declarative tool definitions, and faces your cluster with full administrative access — while ensuring the two never meet inappropriately.
+Named after the Roman god of gateways (who famously looks both ways at once), Janus faces the LLM with clean, declarative tool definitions, and faces your cluster with Kubernetes API access — while enforcing that the two only meet through a redacted, policy-checked boundary.
 
 ## The problem
 
@@ -29,37 +29,51 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 │ custom)      │       │ redacts output │       │               │
 └──────────────┘       └────────────────┘       └───────────────┘
 ```
-1. **Tools, not text dumps** — Janus exposes a set of MCP tools (`get_pods`, `describe_deployment`, `get_events`, etc.) that the LLM can call. It never hands over raw cluster state.
+1. **Tools, not text dumps** — Janus exposes a small set of MCP tools (`get_pods`, `describe_resource`, `get_events`, etc.) that the LLM can call. It never hands over raw cluster state.
 2. **Automatic redaction** — Every response from the Kubernetes API is sanitised. Secrets, tokens, env‑var values, and sensitive metadata are stripped before the LLM ever sees them.
-3. **Human approval for writes** — Read‑only operations are instant. Destructive actions (restart, scale, delete) require an explicit confirmation step inside your MCP client. The LLM can *propose* the action, but a human has to pull the trigger.
-4. **Scoped access** — Janus can be locked to a specific namespace, set of clusters, or even a subset of resources, adding an extra safety net beyond whatever your `KUBECONFIG` permits.
+3. **Bounded remediation, not generic cluster control** — Writes are named operations such as rollout restart, scaling, and pausing/resuming a Deployment rollout. There is no generic kubectl, apply, patch, exec, port-forward, or cp.
+4. **Human approval for writes** — Read-only operations are instant. Every write requires an explicit approval step in the MCP client or through the out-of-band `janus-mcp approve <id>` CLI. The LLM can *propose* the action, but a human has to pull the trigger.
+5. **Scoped access** — Janus can be locked to specific namespaces and can opt out of cluster-scoped resources, adding an extra safety net beyond whatever your `KUBECONFIG` permits.
 
 ## Features
 
 - 🔒 **Zero‑credential exposure** — your `KUBECONFIG` never leaves the process running Janus.
-- 🔍 **Rich read‑only diagnostics** — pods, events, logs, deployments, cluster summaries.
-- ✍️ **Guarded write operations** — rollout restart, scale, and more, with a human‑in‑the‑loop.
+- 🔍 **Rich read‑only diagnostics** — namespaces, pods, events, logs, resource describes, cluster summaries.
+- ✍️ **Guarded remediation** — rollout restart, scale, pause rollout, and resume rollout, with a human in the loop.
 - 🧹 **Pluggable redaction engine** — sensible defaults, easily extended to your own patterns.
 - 🧭 **Cluster overview, two ways** — the `get_cluster_summary` tool, plus a pinnable `cluster://summary` MCP resource that gives the LLM context without a flurry of tool calls.
 - 🧪 **Works with any MCP client** — Claude Code, Claude Desktop, VS Code, Codex, or your own agent loop.
 
+## Security posture
+
+Janus is deliberately not a natural-language `kubectl` replacement. Its
+security claims are concrete:
+
+- No generic command execution or subprocess shell-outs.
+- No code path that fetches `Secret`, `ServiceAccount`, `TokenReview`, or other credential-bearing kinds.
+- No raw kubeconfig, API server URL, token, CA data, or client certificate in MCP frames.
+- Every model-visible result passes structural redaction, pattern/entropy scrubbing, and byte-capped output shaping.
+- Redaction failures fail closed.
+- Writes are absent unless configured, approval-gated at call time, and bound to the exact argument hash.
+- The security suite captures full JSON-RPC sessions and greps for canary credentials and kubeconfig markers.
+
 ## Roadmap
 
-- PyPI / Homebrew / container distribution
+- Homebrew / container distribution
 - Streamable HTTP sidecar mode (bearer token + Origin validation)
 - `diagnose_namespace` prompt template
 
 ## Quick start
 
 ```bash
-# from a checkout (PyPI release pending)
 git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
-uv sync
+uv tool install janus-mcp-server     # or: pipx install janus-mcp-server
+mkdir -p ~/.config/janus-mcp
 cp examples/config.yaml ~/.config/janus-mcp/config.yaml
 $EDITOR ~/.config/janus-mcp/config.yaml   # set your kubeconfig context + namespaces
 
 # register with Claude Code:
-claude mcp add kubernetes -- uv --directory "$PWD" run janus-mcp serve
+claude mcp add kubernetes -- uvx janus-mcp-server serve
 ```
 
 Registration recipes for Claude Desktop, VS Code/Copilot, Codex CLI, and Cursor

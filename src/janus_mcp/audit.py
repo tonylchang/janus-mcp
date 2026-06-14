@@ -13,6 +13,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import anyio
+
 _MAX_BYTES = 10 * 1024 * 1024
 _BACKUPS = 3
 
@@ -45,17 +47,35 @@ class AuditLog:
             with self._path.open("a") as fh:
                 fh.write(line + "\n")
 
+    async def awrite(self, event: str, **fields: Any) -> None:
+        await anyio.to_thread.run_sync(lambda: self.write(event, **fields))
+
     def log_call(self, tool: str, **fields: Any) -> None:
         self.write("tool_call", tool=tool, **fields)
+
+    async def alog_call(self, tool: str, **fields: Any) -> None:
+        await self.awrite("tool_call", tool=tool, **fields)
 
     def log_denied(self, tool: str, **fields: Any) -> None:
         self.write("write_denied", tool=tool, **fields)
 
+    async def alog_denied(self, tool: str, **fields: Any) -> None:
+        await self.awrite("write_denied", tool=tool, **fields)
+
     def log_pending(self, tool: str, **fields: Any) -> None:
         self.write("write_pending", tool=tool, **fields)
+
+    async def alog_pending(self, tool: str, **fields: Any) -> None:
+        await self.awrite("write_pending", tool=tool, **fields)
 
     def log_approved(self, tool: str, **fields: Any) -> None:
         self.write("write_approved", tool=tool, **fields)
 
+    async def alog_approved(self, tool: str, **fields: Any) -> None:
+        await self.awrite("write_approved", tool=tool, **fields)
+
     def log_error(self, tool: str, error: str, **fields: Any) -> None:
         self.write("tool_error", tool=tool, error=error, **fields)
+
+    async def alog_error(self, tool: str, error: str, **fields: Any) -> None:
+        await self.awrite("tool_error", tool=tool, error=error, **fields)

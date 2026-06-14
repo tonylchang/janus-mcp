@@ -28,7 +28,7 @@ from pydantic import Field
 from .audit import AuditLog
 from .config import Settings
 from .kube import BLOCKED_KINDS, KIND_REGISTRY, KubeApi, KubeError
-from .policy import ApprovalGate, ApprovalStore, RateLimiter, ScopeGuard
+from .policy import APPROVAL_STORE_TTL_FACTOR, ApprovalGate, ApprovalStore, RateLimiter, ScopeGuard
 from .redaction import (
     RedactionStats,
     dedupe_events,
@@ -86,10 +86,13 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         "get_logs": settings.limits.rate_per_minute.get_logs,
         "rollout_restart": settings.limits.rate_per_minute.write,
         "scale_deployment": settings.limits.rate_per_minute.write,
+        "pause_rollout": settings.limits.rate_per_minute.write,
+        "resume_rollout": settings.limits.rate_per_minute.write,
     }
     limiter = RateLimiter(rates, settings.limits.rate_per_minute.default)
     store = ApprovalStore(
-        settings.approvals_dir, ttl_seconds=settings.write_tools.approval_timeout_seconds * 2.5
+        settings.approvals_dir,
+        ttl_seconds=settings.write_tools.approval_timeout_seconds * APPROVAL_STORE_TTL_FACTOR,
     )
     gate = ApprovalGate(settings.write_tools, settings.read_only, store)
     limits = settings.limits
@@ -114,14 +117,14 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             log.error("kube_call_failed", error_type=type(exc).__name__)
             raise ToolError("Kubernetes request failed; see server log") from None
 
-    def _shape(tool: str, render: Any, stats: RedactionStats, **fields: Any) -> str:
+    async def _shape(tool: str, render: Any, stats: RedactionStats, **fields: Any) -> str:
         """Render + scrub + envelope, failing closed on any redaction error."""
         try:
             body = render() if callable(render) else render
             body = scrub_text(body, redaction, stats)
             return envelope(tool, body, limits, stats=stats, **fields)
         except Exception as exc:
-            audit.log_error(tool, f"redaction_pipeline:{type(exc).__name__}")
+            await audit.alog_error(tool, f"redaction_pipeline:{type(exc).__name__}")
             log.error("redaction_pipeline_failed", tool=tool, error_type=type(exc).__name__)
             raise ToolError(
                 "internal redaction error; the result was withheld as a precaution"
@@ -167,8 +170,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 )
             return _table(rows)
 
-        result = _shape("list_namespaces", render, stats, items=len(namespaces))
-        audit.log_call("list_namespaces", items=len(namespaces), redactions=stats.total)
+        result = await _shape("list_namespaces", render, stats, items=len(namespaces))
+        await audit.alog_call("list_namespaces", items=len(namespaces), redactions=stats.total)
         return result
 
     @mcp.tool(annotations=_READ_ONLY)
@@ -189,14 +192,16 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         stats = RedactionStats()
         pods = await _fetch(kube.list_pods(namespace, label_selector, field_selector, limit))
         sanitized = [sanitize_object("Pod", p, redaction, stats) for p in pods]
-        result = _shape(
+        result = await _shape(
             "get_pods",
             lambda: render_pod_table(sanitized),
             stats,
             ns=namespace,
             items=len(pods),
         )
-        audit.log_call("get_pods", namespace=namespace, items=len(pods), redactions=stats.total)
+        await audit.alog_call(
+            "get_pods", namespace=namespace, items=len(pods), redactions=stats.total
+        )
         return result
 
     @mcp.tool(annotations=_READ_ONLY)
@@ -243,10 +248,10 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             if original == len(deduped)
             else (f"{len(deduped)} (collapsed from {original})")
         )
-        result = _shape(
+        result = await _shape(
             "get_events", lambda: render_event_lines(deduped), stats, ns=namespace, items=items
         )
-        audit.log_call(
+        await audit.alog_call(
             "get_events", namespace=namespace, items=len(deduped), redactions=stats.total
         )
         return result
@@ -260,7 +265,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         """Detailed, sanitized view of a single resource plus its 10 most recent related
         events. Secrets are not retrievable by this assistant, by design."""
         if kind in BLOCKED_KINDS:
-            audit.log_call("describe_resource", kind=kind, outcome="policy_refused")
+            await audit.alog_call("describe_resource", kind=kind, outcome="policy_refused")
             raise ToolError(
                 "Secret and other credential-bearing kinds are not retrievable by design; "
                 "reference names like secretKeyRef(...) are visible in describe output instead"
@@ -285,7 +290,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         if namespaced and namespace is not None:
             try:
                 events = await _fetch(
-                    kube.list_events(namespace, f"involvedObject.name={name}", 10)
+                    kube.list_events(namespace, f"involvedObject.name={name}", 50)
                 )
                 events.sort(
                     key=lambda e: _event_time(e) or datetime.min.replace(tzinfo=UTC),
@@ -304,8 +309,10 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 body += render_event_lines(related)
             return body
 
-        result = _shape("describe_resource", render, stats, kind=kind, ns=namespace, name=name)
-        audit.log_call(
+        result = await _shape(
+            "describe_resource", render, stats, kind=kind, ns=namespace, name=name
+        )
+        await audit.alog_call(
             "describe_resource",
             kind=kind,
             namespace=namespace,
@@ -360,7 +367,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 lines = [line for line in lines if grep in line]
             return wrap_untrusted("\n".join(lines))
 
-        result = _shape(
+        result = await _shape(
             "get_logs",
             render,
             stats,
@@ -368,7 +375,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             pod=pod,
             previous="true" if previous else None,
         )
-        audit.log_call(
+        await audit.alog_call(
             "get_logs",
             namespace=namespace,
             pod=pod,
@@ -459,9 +466,9 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             lines.append("top restarts: " + ", ".join(f"{name} ({n})" for n, name in top))
         lines.append(f"warning events (last 1h): {warning_count}")
 
-        result = _shape("get_cluster_summary", "\n".join(lines), stats)
+        result = await _shape("get_cluster_summary", "\n".join(lines), stats)
         summary_cache["summary"] = result
-        audit.log_call("get_cluster_summary", via=via, redactions=stats.total)
+        await audit.alog_call("get_cluster_summary", via=via, redactions=stats.total)
         return result
 
     @mcp.tool(annotations=_READ_ONLY)
@@ -494,10 +501,10 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
     ) -> tuple[bool, str | None]:
         decision = await gate.request_approval(ctx, tool, args, action, live_state)
         if decision.approved:
-            audit.log_approved(tool, via=decision.via, **args)
+            await audit.alog_approved(tool, via=decision.via, **args)
             return True, None
         if decision.pending_id is not None:
-            audit.log_pending(tool, approval_id=decision.pending_id, **args)
+            await audit.alog_pending(tool, approval_id=decision.pending_id, **args)
             return False, envelope(
                 tool,
                 f"status=pending approval_id={decision.pending_id}\n"
@@ -507,7 +514,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 "Then call this tool again with exactly the same arguments.",
                 limits,
             )
-        audit.log_denied(tool, via=decision.via, detail=decision.detail, **args)
+        await audit.alog_denied(tool, via=decision.via, detail=decision.detail, **args)
         return False, envelope(
             tool, f"Denied by operator ({decision.detail}). No change was made.", limits
         )
@@ -560,7 +567,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 f"ready: {new_status.get('readyReplicas', 0)}/{new_status.get('replicas', 0)}  "
                 f"updated: {new_status.get('updatedReplicas', 0)}"
             )
-            return _shape("rollout_restart", body, stats, ns=namespace, name=name)
+            return await _shape("rollout_restart", body, stats, ns=namespace, name=name)
 
     def register_scale_deployment() -> None:
         @mcp.tool(annotations=_WRITE)
@@ -598,13 +605,110 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 f"scaled {kind} {namespace}/{name} from {current.replicas} to "
                 f"{result.replicas} replicas\n{result.summary()}"
             )
-            return _shape("scale_deployment", body, stats, ns=namespace, name=name)
+            return await _shape("scale_deployment", body, stats, ns=namespace, name=name)
+
+    def _deployment_rollout_state(live: dict[str, Any]) -> tuple[str, str, bool]:
+        meta = live.get("metadata") or {}
+        spec = live.get("spec") or {}
+        status = live.get("status") or {}
+        replicas = status.get("replicas", spec.get("replicas", 0)) or 0
+        ready = status.get("readyReplicas", 0) or 0
+        updated = status.get("updatedReplicas", 0) or 0
+        paused = bool(spec.get("paused", False))
+        resource_version = str(meta.get("resourceVersion", ""))
+        state = (
+            f"{ready}/{replicas} ready, updated {updated}, "
+            f"generation {meta.get('generation', '?')}, paused={str(paused).lower()}"
+        )
+        return state, resource_version, paused
+
+    def register_pause_rollout() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def pause_rollout(
+            name: str,
+            namespace: str,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request pausing a Deployment rollout. Requires explicit operator
+            approval and only changes spec.paused on the named Deployment."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            scope.check_namespace(namespace)
+            gate.check_enabled("pause_rollout")
+            limiter.acquire("pause_rollout")
+            stats = RedactionStats()
+
+            live = await _fetch(kube.get_object("Deployment", name, namespace))
+            live_state, resource_version, already_paused = _deployment_rollout_state(live)
+            if already_paused:
+                raise ToolError(f"Deployment {namespace}/{name} rollout is already paused")
+
+            args = {"name": name, "namespace": namespace, "reason": reason}
+            action = f"Pause Deployment rollout: {namespace}/{name} (reason: {reason})"
+            approved, message = await _resolve_approval(
+                ctx, "pause_rollout", args, action, live_state
+            )
+            if not approved:
+                return message or "request not approved"
+
+            result = await _fetch(
+                kube.set_deployment_paused(name, namespace, True, resource_version)
+            )
+            summary_cache.clear()
+            new_state, _, _ = _deployment_rollout_state(result)
+            body = f"paused Deployment rollout {namespace}/{name}\n{new_state}"
+            return await _shape("pause_rollout", body, stats, ns=namespace, name=name)
+
+    def register_resume_rollout() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def resume_rollout(
+            name: str,
+            namespace: str,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request resuming a paused Deployment rollout. Requires explicit
+            operator approval and only changes spec.paused on the named Deployment."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            scope.check_namespace(namespace)
+            gate.check_enabled("resume_rollout")
+            limiter.acquire("resume_rollout")
+            stats = RedactionStats()
+
+            live = await _fetch(kube.get_object("Deployment", name, namespace))
+            live_state, resource_version, already_paused = _deployment_rollout_state(live)
+            if not already_paused:
+                raise ToolError(f"Deployment {namespace}/{name} rollout is not paused")
+
+            args = {"name": name, "namespace": namespace, "reason": reason}
+            action = f"Resume Deployment rollout: {namespace}/{name} (reason: {reason})"
+            approved, message = await _resolve_approval(
+                ctx, "resume_rollout", args, action, live_state
+            )
+            if not approved:
+                return message or "request not approved"
+
+            result = await _fetch(
+                kube.set_deployment_paused(name, namespace, False, resource_version)
+            )
+            summary_cache.clear()
+            new_state, _, _ = _deployment_rollout_state(result)
+            body = f"resumed Deployment rollout {namespace}/{name}\n{new_state}"
+            return await _shape("resume_rollout", body, stats, ns=namespace, name=name)
 
     if not settings.read_only:
         if "rollout_restart" in settings.write_tools.enabled:
             register_rollout_restart()
         if "scale_deployment" in settings.write_tools.enabled:
             register_scale_deployment()
+        if "pause_rollout" in settings.write_tools.enabled:
+            register_pause_rollout()
+        if "resume_rollout" in settings.write_tools.enabled:
+            register_resume_rollout()
 
     return mcp
 

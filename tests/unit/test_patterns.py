@@ -112,6 +112,33 @@ def test_key_value_keeps_key_name() -> None:
     assert "hunter2" not in out
 
 
+def test_key_value_redacts_values_with_spaces() -> None:
+    out = scrub("login failed password=my passphrase")
+    assert out == "login failed password=[REDACTED]"
+    assert "my" not in out
+    assert "passphrase" not in out
+
+
+def test_key_value_keeps_diagnostic_suffix_after_credential() -> None:
+    out = scrub("Error: password=my passphrase to upstream at 203.0.113.99")
+    assert "password=[REDACTED] to upstream at [REDACTED:ip]" in out
+    assert "my passphrase" not in out
+
+
+def test_key_value_redacts_quoted_json_value_with_spaces() -> None:
+    out = scrub('{"password": "my passphrase", "status": "failed"}')
+    assert '"password": [REDACTED]' in out
+    assert '"status": "failed"' in out
+    assert "my passphrase" not in out
+
+
+def test_entropy_pass_tokenizes_tabs() -> None:
+    out = scrub(f"session\t{support.CANARY_HIGH_ENTROPY}\tdone")
+    assert support.CANARY_HIGH_ENTROPY not in out
+    assert "[REDACTED:high-entropy]" in out
+    assert "\t" in out
+
+
 def test_newlines_preserved() -> None:
     text = "line one\nline two password=x\nline three"
     out = scrub(text)
