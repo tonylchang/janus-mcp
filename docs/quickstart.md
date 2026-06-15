@@ -53,7 +53,8 @@ kubeconfig can read Secrets — janus-mcp never will, but see
 ## 3. Register with your MCP client
 
 All recipes use `janus-mcp-server` from PyPI. For a source checkout, replace
-`janus-mcp-server` with `janus-mcp` and prefix with `uvx` / `uv`.
+`uvx janus-mcp-server serve` with
+`uv --directory /path/to/janus-mcp run janus-mcp serve`.
 Client config formats change — when in doubt, check your client's MCP docs.
 
 ### Claude Code

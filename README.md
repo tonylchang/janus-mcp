@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo.png" alt="Janus — security-first Kubernetes MCP gateway that protects secrets and blocks leaks to LLMs" width="570">
+  <img src="https://raw.githubusercontent.com/tonylchang/janus-mcp/main/docs/assets/logo.png" alt="Janus — security-first Kubernetes MCP gateway that protects secrets and blocks leaks to LLMs" width="570">
 </p>
 
 <p align="center">
@@ -66,18 +66,30 @@ security claims are concrete:
 ## Quick start
 
 ```bash
-git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
 uv tool install janus-mcp-server     # or: pipx install janus-mcp-server
 mkdir -p ~/.config/janus-mcp
-cp examples/config.yaml ~/.config/janus-mcp/config.yaml
+curl -fsSL https://raw.githubusercontent.com/tonylchang/janus-mcp/main/examples/config.yaml \
+  -o ~/.config/janus-mcp/config.yaml
 $EDITOR ~/.config/janus-mcp/config.yaml   # set your kubeconfig context + namespaces
 
 # register with Claude Code:
 claude mcp add kubernetes -- uvx janus-mcp-server serve
 ```
 
+From a source checkout:
+
+```bash
+git clone https://github.com/tonylchang/janus-mcp && cd janus-mcp
+uv sync
+mkdir -p ~/.config/janus-mcp
+cp examples/config.yaml ~/.config/janus-mcp/config.yaml
+$EDITOR ~/.config/janus-mcp/config.yaml
+
+claude mcp add kubernetes -- uv --directory "$PWD" run janus-mcp serve
+```
+
 Registration recipes for Claude Desktop, VS Code/Copilot, Codex CLI, and Cursor
-are in the **[quick start guide](docs/quickstart.md)**.
+are in the **[quick start guide](https://github.com/tonylchang/janus-mcp/blob/main/docs/quickstart.md)**.
 
 Now ask your AI assistant something like:
 *“Why are pods crashing in the prod namespace?”*
@@ -86,11 +98,11 @@ Janus will fetch the relevant information, sanitise it, and the LLM will walk yo
 
 ## Docs
 
-- [Operator runbook](docs/runbook.md) — install, least-privilege RBAC, approvals, audit log, troubleshooting
-- [Threat model](docs/threat-model.md) — the five security invariants and how CI verifies them
-- [Bounded remediation](docs/bounded-remediation.md) — current and candidate write tools, with guardrails
-- [Security comparison](docs/security-comparison.md) — how Janus differs from broad Kubernetes MCP servers
-- [Release security checklist](docs/release-security.md) — tests, provenance, and distribution hardening
-- [`rbac/`](rbac/janus-mcp-rbac.yaml) — least-privilege manifests (note what is absent: secrets — nowhere, ever)
+- [Operator runbook](https://github.com/tonylchang/janus-mcp/blob/main/docs/runbook.md) — install, least-privilege RBAC, approvals, audit log, troubleshooting
+- [Threat model](https://github.com/tonylchang/janus-mcp/blob/main/docs/threat-model.md) — the five security invariants and how CI verifies them
+- [Bounded remediation](https://github.com/tonylchang/janus-mcp/blob/main/docs/bounded-remediation.md) — current and candidate write tools, with guardrails
+- [Security comparison](https://github.com/tonylchang/janus-mcp/blob/main/docs/security-comparison.md) — how Janus differs from broad Kubernetes MCP servers
+- [Release security checklist](https://github.com/tonylchang/janus-mcp/blob/main/docs/release-security.md) — tests, provenance, and distribution hardening
+- [`rbac/`](https://github.com/tonylchang/janus-mcp/blob/main/rbac/janus-mcp-rbac.yaml) — least-privilege manifests (note what is absent: secrets — nowhere, ever)
 
 Janus is currently in active development.

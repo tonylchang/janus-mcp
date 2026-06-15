@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "janus-mcp-server"
 version = "0.1.0"
-description = "Secure Kubernetes MCP server: redacted diagnostics and human-approved writes, credentials never leave the process."
+description = "Security-first Kubernetes MCP gateway: redacted diagnostics, bounded remediation, credentials never leave the process."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"

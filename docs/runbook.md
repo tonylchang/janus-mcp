@@ -38,7 +38,7 @@ the credentials are over-privileged (can read Secrets).
   "mcpServers": {
     "kubernetes": {
       "command": "uvx",
-      "args": ["janus-mcp", "serve", "--config", "/Users/me/.config/janus-mcp/config.yaml"]
+      "args": ["janus-mcp-server", "serve", "--config", "/Users/me/.config/janus-mcp/config.yaml"]
     }
   }
 }

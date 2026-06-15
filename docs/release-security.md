@@ -21,12 +21,24 @@ keeps Janus releases aligned with the project threat model.
 ## Distribution targets
 
 - Publish signed GitHub release artifacts.
-- Publish Python wheels and sdists with provenance once the release pipeline
-  supports it.
+- Publish Python wheels and sdists with Trusted Publishing provenance.
 - Publish a container image only after the image has an SBOM and vulnerability
   scan attached.
 - Publish a Homebrew formula only after the release artifact checksums are
   generated from signed artifacts.
+
+## Messaging alignment
+
+- Confirm `README.md` and the PyPI-rendered project description tell the same
+  story: security-first Kubernetes MCP gateway, credentials stay local,
+  redacted diagnostics, scoped access, and bounded human-approved remediation.
+- Confirm `pyproject.toml`'s `description` matches that positioning; it becomes
+  the PyPI summary line.
+- Confirm install snippets use the PyPI package name `janus-mcp-server` and the
+  installed CLI name `janus-mcp` deliberately.
+- Confirm the GitHub repository About text is consistent with the PyPI summary.
+- Remove release-stale language that implies the package is not on PyPI before
+  tagging.
 
 ## Public proof points
 
