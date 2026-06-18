@@ -33,7 +33,8 @@ winning move is to never put secrets there.
    consent. Approval arrives via MCP elicitation (client-rendered UI) or the
    out-of-band CLI (`janus-mcp approve <id>`), which binds a SHA-256 hash of the
    exact arguments to the approval ID (bait-and-switch prevention) and burns
-   each approval on first use.
+   each approval on first use. Out-of-band approvals also bind the resource UID
+   and `resourceVersion`, so changed live state requires a new review.
 5. **Scope is enforced server-side on every call**, independent of RBAC:
    namespace allow/deny lists (deny wins), cluster-scope opt-in, kubeconfig
    context pinning, and least-privilege RBAC manifests (`rbac/`) as the second

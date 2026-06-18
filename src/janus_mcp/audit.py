@@ -42,10 +42,12 @@ class AuditLog:
         record = {"ts": datetime.now(UTC).isoformat(), "event": event, **fields}
         line = json.dumps(record, sort_keys=True, default=str)
         with self._lock:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self._path.parent.chmod(0o700)
             self._rotate_if_needed()
             with self._path.open("a") as fh:
                 fh.write(line + "\n")
+            self._path.chmod(0o600)
 
     async def awrite(self, event: str, **fields: Any) -> None:
         await anyio.to_thread.run_sync(lambda: self.write(event, **fields))
@@ -79,3 +81,9 @@ class AuditLog:
 
     async def alog_error(self, tool: str, error: str, **fields: Any) -> None:
         await self.awrite("tool_error", tool=tool, error=error, **fields)
+
+    def log_result(self, tool: str, outcome: str, **fields: Any) -> None:
+        self.write("tool_result", tool=tool, outcome=outcome, **fields)
+
+    async def alog_result(self, tool: str, outcome: str, **fields: Any) -> None:
+        await self.awrite("tool_result", tool=tool, outcome=outcome, **fields)

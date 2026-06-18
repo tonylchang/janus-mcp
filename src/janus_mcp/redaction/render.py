@@ -64,29 +64,57 @@ def envelope(
     line, and the header always reflects the final truncated state.
     """
     body = body.rstrip("\n")
-    truncated = False
     max_bytes = limits.result_max_bytes
-    if len(body.encode("utf-8", errors="replace")) > max_bytes:
-        truncated = True
-        kept: list[str] = []
-        budget = max_bytes - len(TRUNCATION_HINT.encode()) - 1
-        used = 0
-        for line in body.split("\n"):
-            line_bytes = len(line.encode("utf-8", errors="replace")) + 1
-            if used + line_bytes > budget:
-                break
-            kept.append(line)
-            used += line_bytes
-        body = "\n".join([*kept, TRUNCATION_HINT])
 
-    parts = [f"ok={'true' if ok else 'false'}", f"tool={tool}"]
-    for key, value in fields.items():
-        if value is not None:
-            parts.append(f"{key}={value}")
-    parts.append(f"truncated={'true' if truncated else 'false'}")
-    parts.append(f"redactions={stats.total if stats else 0}")
-    header = "[janus-mcp] " + " ".join(parts)
-    return f"{header}\n{body}" if body else header
+    def make_header(truncated: bool) -> str:
+        parts = [f"ok={'true' if ok else 'false'}", f"tool={tool}"]
+        for key, value in fields.items():
+            if value is not None:
+                parts.append(f"{key}={value}")
+        parts.append(f"truncated={'true' if truncated else 'false'}")
+        parts.append(f"redactions={stats.total if stats else 0}")
+        return "[janus-mcp] " + " ".join(parts)
+
+    header = make_header(False)
+    complete = f"{header}\n{body}" if body else header
+    if len(complete.encode("utf-8", errors="replace")) <= max_bytes:
+        return complete
+
+    header = make_header(True)
+    footer = ""
+    lines = body.split("\n")
+    if lines and lines[0] == UNTRUSTED_BEGIN:
+        lines = lines[1:]
+        if lines and lines[-1] == UNTRUSTED_END:
+            lines = lines[:-1]
+        footer = UNTRUSTED_END
+
+    reserved = [header, TRUNCATION_HINT]
+    if footer:
+        reserved.extend([UNTRUSTED_BEGIN, footer])
+    budget = max_bytes - sum(len(part.encode("utf-8")) for part in reserved)
+    # One newline joins each output component.
+    component_count = 3 + (2 if footer else 0)
+    budget -= component_count - 1
+
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        line_bytes = len(line.encode("utf-8", errors="replace"))
+        separator = 1 if kept else 0
+        if used + separator + line_bytes > max(0, budget):
+            break
+        kept.append(line)
+        used += separator + line_bytes
+
+    components = [header]
+    if footer:
+        components.append(UNTRUSTED_BEGIN)
+    components.extend(kept)
+    components.append(TRUNCATION_HINT)
+    if footer:
+        components.append(footer)
+    return "\n".join(components)
 
 
 def _columns(rows: list[list[str]]) -> str:

@@ -62,7 +62,8 @@ def test_writes_enabled_logic(tmp_path) -> None:
 
 
 def test_audit_records_are_json_lines(tmp_path) -> None:
-    audit = AuditLog(tmp_path / "audit.jsonl")
+    path = tmp_path / "audit.jsonl"
+    audit = AuditLog(path)
     audit.log_call("get_pods", namespace="prod", items=4, redactions=2)
     audit.log_denied("scale_deployment", via="elicitation", name="x")
     lines = (tmp_path / "audit.jsonl").read_text().strip().split("\n")
@@ -73,6 +74,8 @@ def test_audit_records_are_json_lines(tmp_path) -> None:
     assert first["redactions"] == 2
     assert "ts" in first
     assert second["event"] == "write_denied"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.parent.stat().st_mode & 0o777 == 0o700
 
 
 @pytest.mark.anyio

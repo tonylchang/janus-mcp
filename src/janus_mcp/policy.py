@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import re
 import secrets
 import time
 from dataclasses import dataclass
@@ -26,6 +28,7 @@ from .config import ScopeSettings, WriteToolsSettings
 # Keep out-of-band approvals around longer than the in-client elicitation
 # timeout so a human has time to switch terminals, inspect, approve, and retry.
 APPROVAL_STORE_TTL_FACTOR = 2.5
+_APPROVAL_ID = re.compile(r"^[0-9a-f]{16}$")
 
 
 class ScopeGuard:
@@ -89,6 +92,10 @@ def _args_hash(tool: str, args: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+def _state_hash(state_token: str) -> str:
+    return hashlib.sha256(state_token.encode()).hexdigest()
+
+
 @dataclass
 class Decision:
     approved: bool
@@ -110,52 +117,131 @@ class ApprovalStore:
         self._ttl = ttl_seconds
 
     def _path(self, approval_id: str) -> Path:
+        if not _APPROVAL_ID.fullmatch(approval_id):
+            raise ValueError("invalid approval id")
         return self._dir / f"{approval_id}.json"
+
+    def _approved_path(self, approval_id: str) -> Path:
+        if not _APPROVAL_ID.fullmatch(approval_id):
+            raise ValueError("invalid approval id")
+        return self._dir / f"{approval_id}.approved"
+
+    def _ensure_dir(self) -> None:
+        self._dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self._dir.chmod(0o700)
+
+    def _atomic_write(self, path: Path, record: dict[str, Any]) -> None:
+        self._ensure_dir()
+        temporary = self._dir / f".{path.stem}.{secrets.token_hex(8)}.tmp"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(temporary, flags, 0o600)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(record, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            path.chmod(0o600)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def _load(self, path: Path) -> dict[str, Any] | None:
         try:
-            record: dict[str, Any] = json.loads(path.read_text())
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags)
+            with os.fdopen(fd) as stream:
+                record: dict[str, Any] = json.load(stream)
         except (OSError, ValueError):
             return None
         if not isinstance(record, dict):
             return None
-        if record.get("expires_at", 0) < time.time():
+        expires_at = record.get("expires_at")
+        if not isinstance(expires_at, int | float):
+            return None
+        if expires_at < time.time():
             path.unlink(missing_ok=True)
+            if _APPROVAL_ID.fullmatch(path.stem):
+                self._approved_path(path.stem).unlink(missing_ok=True)
             return None
         return record
 
-    def create(self, tool: str, args: dict[str, Any], action: str) -> str:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        approval_id = secrets.token_hex(4)
+    def _is_approved(self, approval_id: str) -> bool:
+        marker = self._approved_path(approval_id)
+        try:
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(marker, flags)
+        except OSError:
+            return False
+        os.close(fd)
+        return True
+
+    def create(
+        self,
+        tool: str,
+        args: dict[str, Any],
+        action: str,
+        live_state: str = "unavailable",
+        state_token: str = "",
+    ) -> str:
+        self._ensure_dir()
+        approval_id = secrets.token_hex(8)
         record = {
             "id": approval_id,
             "tool": tool,
             "args_hash": _args_hash(tool, args),
+            "state_hash": _state_hash(state_token),
             "action": action,
+            "live_state": live_state,
             "created_at": time.time(),
             "expires_at": time.time() + self._ttl,
             "approved": False,
         }
-        self._path(approval_id).write_text(json.dumps(record, indent=2))
+        self._atomic_write(self._path(approval_id), record)
         return approval_id
 
     def approve(self, approval_id: str) -> dict[str, Any] | None:
         """Mark a pending record approved (called by the CLI, never by the model)."""
-        path = self._path(approval_id)
+        try:
+            path = self._path(approval_id)
+        except ValueError:
+            return None
         record = self._load(path)
         if record is None:
             return None
+        marker = self._approved_path(approval_id)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(marker, flags, 0o600)
+        except FileExistsError:
+            if not self._is_approved(approval_id):
+                return None
+        else:
+            os.close(fd)
         record["approved"] = True
-        path.write_text(json.dumps(record, indent=2))
         return record
 
     def list_pending(self) -> list[dict[str, Any]]:
         if not self._dir.is_dir():
             return []
-        records = [self._load(p) for p in sorted(self._dir.glob("*.json"))]
-        return [r for r in records if r is not None]
+        records: list[dict[str, Any]] = []
+        for path in sorted(self._dir.glob("*.json")):
+            record = self._load(path)
+            if record is None:
+                continue
+            approval_id = record.get("id")
+            if (
+                not isinstance(approval_id, str)
+                or not _APPROVAL_ID.fullmatch(approval_id)
+                or path.stem != approval_id
+            ):
+                continue
+            record["approved"] = bool(record.get("approved")) or self._is_approved(approval_id)
+            records.append(record)
+        return records
 
-    def consume(self, tool: str, args: dict[str, Any]) -> tuple[str, str | None]:
+    def consume(
+        self, tool: str, args: dict[str, Any], state_token: str = ""
+    ) -> tuple[str, str | None]:
         """Look up the approval state for this exact (tool, args) pair.
 
         Returns one of ("approved", id) — record found and burned;
@@ -163,12 +249,24 @@ class ApprovalStore:
         ("none", None) — no matching record.
         """
         wanted = _args_hash(tool, args)
+        wanted_state = _state_hash(state_token)
         for record in self.list_pending():
             if record.get("tool") == tool and record.get("args_hash") == wanted:
+                path = self._path(str(record["id"]))
+                if record.get("state_hash") != wanted_state:
+                    path.unlink(missing_ok=True)
+                    self._approved_path(str(record["id"])).unlink(missing_ok=True)
+                    return "stale", str(record["id"])
                 if record.get("approved"):
-                    self._path(record["id"]).unlink(missing_ok=True)  # burn on use
-                    return "approved", record["id"]
-                return "pending", record["id"]
+                    claim = self._dir / f".{record['id']}.{secrets.token_hex(8)}.claim"
+                    try:
+                        os.rename(path, claim)
+                    except FileNotFoundError:
+                        continue
+                    self._approved_path(str(record["id"])).unlink(missing_ok=True)
+                    claim.unlink(missing_ok=True)  # burn on use
+                    return "approved", str(record["id"])
+                return "pending", str(record["id"])
         return "none", None
 
 
@@ -227,6 +325,7 @@ class ApprovalGate:
         args: dict[str, Any],
         action: str,
         live_state: str,
+        state_token: str,
     ) -> Decision:
         message = (
             f"⚠ Cluster write requested\n{action}\nLive state: {live_state}\nApprove this change?"
@@ -245,7 +344,7 @@ class ApprovalGate:
 
         # Out-of-band fallback: the client cannot render an approval prompt, so
         # the request is parked and the human approves via `janus-mcp approve <id>`.
-        state, approval_id = self._store.consume(tool, args)
+        state, approval_id = self._store.consume(tool, args, state_token)
         if state == "approved":
             return Decision(approved=True, via="oob-cli", pending_id=approval_id)
         if state == "pending":
@@ -255,7 +354,7 @@ class ApprovalGate:
                 pending_id=approval_id,
                 detail="awaiting operator approval",
             )
-        approval_id = self._store.create(tool, args, action)
+        approval_id = self._store.create(tool, args, action, live_state, state_token)
         return Decision(
             approved=False,
             via="oob-created",

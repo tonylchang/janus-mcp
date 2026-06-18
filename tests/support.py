@@ -13,7 +13,7 @@ from typing import Any
 
 from janus_mcp.audit import AuditLog
 from janus_mcp.config import Settings
-from janus_mcp.kube import KubeError, ScaleInfo
+from janus_mcp.kube import KubeError, KubePage, ScaleInfo
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -111,15 +111,16 @@ class FakeKube:
             replicas=2,
             ready_replicas=2,
             resource_version="12345",
+            uid="deployment-payments-api",
         )
         self.deployment = load_fixture("deployment.json")
 
     def _record(self, method: str, **kwargs: Any) -> None:
         self.calls.append((method, kwargs))
 
-    async def list_namespaces(self) -> list[dict[str, Any]]:
+    async def list_namespaces(self) -> KubePage:
         self._record("list_namespaces")
-        return list(load_fixture("namespaces.json"))
+        return KubePage(list(load_fixture("namespaces.json")))
 
     async def get_namespace(self, name: str) -> dict[str, Any]:
         self._record("get_namespace", name=name)
@@ -134,7 +135,7 @@ class FakeKube:
         label_selector: str | None,
         field_selector: str | None,
         limit: int,
-    ) -> list[dict[str, Any]]:
+    ) -> KubePage:
         self._record(
             "list_pods",
             namespace=namespace,
@@ -143,15 +144,14 @@ class FakeKube:
             limit=limit,
         )
         if namespace != "prod":
-            return []
-        return list(load_fixture("pods.json"))
+            return KubePage([])
+        pods = list(load_fixture("pods.json"))
+        return KubePage(pods[:limit], partial=len(pods) > limit)
 
-    async def list_events(
-        self, namespace: str, field_selector: str | None, limit: int
-    ) -> list[dict[str, Any]]:
+    async def list_events(self, namespace: str, field_selector: str | None, limit: int) -> KubePage:
         self._record("list_events", namespace=namespace, field_selector=field_selector, limit=limit)
         if namespace != "prod":
-            return []
+            return KubePage([])
         events = list(load_fixture("events.json"))
         if field_selector and "involvedObject.name=" in field_selector:
             wanted = next(
@@ -162,7 +162,7 @@ class FakeKube:
             events = [e for e in events if e["involvedObject"]["name"] == wanted]
         if field_selector and "type=Warning" in field_selector:
             events = [e for e in events if e.get("type") == "Warning"]
-        return events[:limit]
+        return KubePage(events[:limit], partial=len(events) > limit)
 
     async def get_object(self, kind: str, name: str, namespace: str | None) -> dict[str, Any]:
         self._record("get_object", kind=kind, name=name, namespace=namespace)
@@ -206,15 +206,73 @@ class FakeKube:
         text = str(load_fixture("pod.log"))
         return "\n".join(text.splitlines()[-tail_lines:])
 
-    async def list_deployments(self, namespace: str) -> list[dict[str, Any]]:
+    async def list_deployments(self, namespace: str) -> KubePage:
         self._record("list_deployments", namespace=namespace)
         if namespace != "prod":
-            return []
-        return [load_fixture("deployment.json")]
+            return KubePage([])
+        return KubePage([load_fixture("deployment.json")])
 
-    async def list_nodes(self) -> list[dict[str, Any]]:
+    async def list_replica_sets(self, namespace: str, limit: int) -> KubePage:
+        self._record("list_replica_sets", namespace=namespace, limit=limit)
+        if namespace != "prod":
+            return KubePage([])
+        deployment = load_fixture("deployment.json")
+        replicasets = []
+        for revision in (12, 13, 14):
+            replicasets.append(
+                {
+                    "kind": "ReplicaSet",
+                    "metadata": {
+                        "name": f"payments-api-r{revision}",
+                        "namespace": namespace,
+                        "creationTimestamp": f"2026-06-{revision - 5:02d}T08:00:00Z",
+                        "annotations": {"deployment.kubernetes.io/revision": str(revision)},
+                        "ownerReferences": [
+                            {
+                                "kind": "Deployment",
+                                "name": deployment["metadata"]["name"],
+                                "uid": deployment["metadata"]["uid"],
+                                "controller": True,
+                            }
+                        ],
+                    },
+                    "spec": {"replicas": 2},
+                    "status": {"replicas": 2, "readyReplicas": 2},
+                }
+            )
+        return KubePage(replicasets[:limit], partial=len(replicasets) > limit)
+
+    async def list_hpas(self, namespace: str, limit: int) -> KubePage:
+        self._record("list_hpas", namespace=namespace, limit=limit)
+        if namespace != "prod":
+            return KubePage([])
+        return KubePage(
+            [
+                {
+                    "metadata": {"name": "payments-api"},
+                    "spec": {"minReplicas": 2, "maxReplicas": 10},
+                    "status": {"currentReplicas": 2, "desiredReplicas": 3},
+                }
+            ]
+        )
+
+    async def list_pvcs(self, namespace: str, limit: int) -> KubePage:
+        self._record("list_pvcs", namespace=namespace, limit=limit)
+        if namespace != "prod":
+            return KubePage([])
+        return KubePage(
+            [
+                {
+                    "metadata": {"name": "payments-data"},
+                    "spec": {"storageClassName": "standard"},
+                    "status": {"phase": "Bound", "capacity": {"storage": "10Gi"}},
+                }
+            ]
+        )
+
+    async def list_nodes(self) -> KubePage:
         self._record("list_nodes")
-        return [load_fixture("node.json")]
+        return KubePage([load_fixture("node.json")])
 
     async def server_version(self) -> str:
         self._record("server_version")
@@ -246,16 +304,33 @@ class FakeKube:
             replicas=replicas,
             ready_replicas=self.scale_state.ready_replicas,
             resource_version=str(int(expected_resource_version) + 1),
+            uid=self.scale_state.uid,
         )
         return self.scale_state
 
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]:
-        self._record("rollout_restart", kind=kind, name=name, namespace=namespace, reason=reason)
+        self._record(
+            "rollout_restart",
+            kind=kind,
+            name=name,
+            namespace=namespace,
+            reason=reason,
+            expected_resource_version=expected_resource_version,
+        )
+        if expected_resource_version != self.deployment["metadata"]["resourceVersion"]:
+            raise KubeError(f"conflict: {kind} {namespace}/{name} changed; re-read and retry")
         result = copy.deepcopy(self.deployment)
         result["metadata"] = dict(result["metadata"])
         result["metadata"]["generation"] = 15
+        result["metadata"]["resourceVersion"] = str(int(expected_resource_version) + 1)
+        self.deployment = copy.deepcopy(result)
         return result
 
     async def set_deployment_paused(

@@ -38,7 +38,7 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 ## Features
 
 - 🔒 **Zero‑credential exposure** — your `KUBECONFIG` never leaves the process running Janus.
-- 🔍 **Rich read‑only diagnostics** — namespaces, pods, events, logs, resource describes, cluster summaries.
+- 🔍 **Rich read‑only diagnostics** — namespaces, pods, events, logs, rollout status/history, namespace health, focused pod diagnosis, resource describes, and cluster summaries.
 - ✍️ **Guarded remediation** — rollout restart, scale, pause rollout, and resume rollout, with a human in the loop.
 - 🧹 **Pluggable redaction engine** — sensible defaults, easily extended to your own patterns.
 - 🧭 **Cluster overview, two ways** — the `get_cluster_summary` tool, plus a pinnable `cluster://summary` MCP resource that gives the LLM context without a flurry of tool calls.
@@ -60,8 +60,7 @@ security claims are concrete:
 ## Roadmap
 
 - Homebrew / container distribution
-- Streamable HTTP sidecar mode (bearer token + Origin validation)
-- `diagnose_namespace` prompt template
+- Streamable HTTP sidecar mode only after the dedicated [transport security gates](https://github.com/tonylchang/janus-mcp/blob/main/docs/http-transport-threat-model.md) are implemented
 
 ## Quick start
 
@@ -71,6 +70,7 @@ mkdir -p ~/.config/janus-mcp
 curl -fsSL https://raw.githubusercontent.com/tonylchang/janus-mcp/main/examples/config.yaml \
   -o ~/.config/janus-mcp/config.yaml
 $EDITOR ~/.config/janus-mcp/config.yaml   # set your kubeconfig context + namespaces
+janus-mcp doctor --strict                 # safe context/RBAC/auth preflight
 
 # register with Claude Code:
 claude mcp add kubernetes -- uvx janus-mcp-server serve
@@ -103,6 +103,7 @@ Janus will fetch the relevant information, sanitise it, and the LLM will walk yo
 - [Bounded remediation](https://github.com/tonylchang/janus-mcp/blob/main/docs/bounded-remediation.md) — current and candidate write tools, with guardrails
 - [Security comparison](https://github.com/tonylchang/janus-mcp/blob/main/docs/security-comparison.md) — how Janus differs from broad Kubernetes MCP servers
 - [Release security checklist](https://github.com/tonylchang/janus-mcp/blob/main/docs/release-security.md) — tests, provenance, and distribution hardening
+- [HTTP transport security gates](https://github.com/tonylchang/janus-mcp/blob/main/docs/http-transport-threat-model.md) — required controls before Janus opens a network listener
 - [`rbac/`](https://github.com/tonylchang/janus-mcp/blob/main/rbac/janus-mcp-rbac.yaml) — least-privilege manifests (note what is absent: secrets — nowhere, ever)
 
 Janus is currently in active development.

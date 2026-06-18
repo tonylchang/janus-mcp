@@ -12,8 +12,9 @@ from janus_mcp.redaction import (
     envelope,
     render_event_lines,
     render_pod_table,
+    wrap_untrusted,
 )
-from janus_mcp.redaction.render import _format_age
+from janus_mcp.redaction.render import UNTRUSTED_BEGIN, UNTRUSTED_END, _format_age
 
 NOW = datetime(2026, 6, 10, 8, 5, 0, tzinfo=UTC)
 LIMITS = LimitsSettings()
@@ -33,11 +34,28 @@ def test_envelope_truncates_on_line_boundary() -> None:
     body = "\n".join(f"line {i} " + "x" * 80 for i in range(100))
     out = envelope("get_logs", body, limits)
     assert "truncated=true" in out.split("\n")[0]
-    assert len(out.encode()) < 1024 + 200  # header allowance
+    assert len(out.encode()) <= 1024
     assert out.endswith("retry]")
     # no partial line: every kept line is intact
     for line in out.split("\n")[1:-1]:
         assert line.startswith("line ")
+
+
+def test_envelope_caps_complete_utf8_response() -> None:
+    limits = LimitsSettings(result_max_bytes=1024)
+    out = envelope("get_logs", "é" * 2000, limits, ns="prod", pod="payments-api")
+    assert len(out.encode("utf-8")) <= 1024
+    assert "truncated=true" in out
+
+
+def test_envelope_preserves_untrusted_markers_when_truncated() -> None:
+    limits = LimitsSettings(result_max_bytes=1024)
+    body = wrap_untrusted("\n".join(f"line-{i:04d}" for i in range(500)))
+    out = envelope("get_logs", body, limits)
+    assert UNTRUSTED_BEGIN in out
+    assert out.endswith(UNTRUSTED_END)
+    assert out.count(UNTRUSTED_END) == 1
+    assert len(out.encode("utf-8")) <= 1024
 
 
 def test_pod_table_matches_walkthrough_shape() -> None:

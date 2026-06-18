@@ -174,6 +174,99 @@ async def test_cluster_summary_resource_is_listed_and_sanitized(server) -> None:
         assert canary not in text
 
 
+async def test_diagnostic_tools_and_prompt_are_available(server) -> None:
+    async with connect(server) as client:
+        tools = {tool.name for tool in (await client.list_tools()).tools}
+        assert {
+            "rollout_status",
+            "rollout_history",
+            "namespace_health",
+            "diagnose_pod",
+        }.issubset(tools)
+
+        calls = [
+            (
+                "rollout_status",
+                {"kind": "Deployment", "name": "payments-api", "namespace": "prod"},
+            ),
+            ("rollout_history", {"name": "payments-api", "namespace": "prod"}),
+            ("namespace_health", {"namespace": "prod"}),
+            (
+                "diagnose_pod",
+                {"name": "payments-api-7f9c6d4b-xkq2p", "namespace": "prod"},
+            ),
+        ]
+        for tool, args in calls:
+            result = await client.call_tool(tool, args)
+            assert not result.isError, f"{tool}: {result.content[0].text}"
+            for canary in support.ALL_CANARIES:
+                assert canary not in result.content[0].text
+
+        prompts = {prompt.name for prompt in (await client.list_prompts()).prompts}
+        assert "diagnose_namespace" in prompts
+        prompt = await client.get_prompt("diagnose_namespace", {"namespace": "prod"})
+        assert "namespace prod" in prompt.messages[0].content.text
+
+
+async def test_structural_redaction_failure_is_generic_and_leak_free(server, monkeypatch) -> None:
+    import janus_mcp.server as server_module
+
+    def explode(*args, **kwargs):
+        raise RuntimeError(f"redaction failed near {support.ALL_CANARIES[0]}")
+
+    monkeypatch.setattr(server_module, "sanitize_object", explode)
+    result = await _call(server, "get_pods", {"namespace": "prod"})
+    assert result.isError
+    assert "internal redaction error" in result.content[0].text
+    assert support.ALL_CANARIES[0] not in result.content[0].text
+
+
+@pytest.mark.parametrize("attribute", ["render_pod_table", "scrub_text", "envelope"])
+async def test_each_output_layer_fails_closed(server, monkeypatch, attribute: str) -> None:
+    import janus_mcp.server as server_module
+
+    def explode(*args, **kwargs):
+        raise RuntimeError(f"pipeline failure {support.ALL_CANARIES[1]}")
+
+    monkeypatch.setattr(server_module, attribute, explode)
+    result = await _call(server, "get_pods", {"namespace": "prod"})
+    assert result.isError
+    assert "internal redaction error" in result.content[0].text
+    assert support.ALL_CANARIES[1] not in result.content[0].text
+
+
+async def test_rejected_calls_receive_audit_outcome(settings, fake_kube) -> None:
+    import json
+
+    from janus_mcp.audit import AuditLog
+
+    server = build_server(settings, fake_kube, AuditLog(settings.audit_log))
+    result = await _call(server, "get_pods", {"namespace": "outside"})
+    assert result.isError
+    records = [json.loads(line) for line in settings.audit_log.read_text().splitlines()]
+    assert any(
+        record.get("event") == "tool_result"
+        and record.get("tool") == "get_pods"
+        and record.get("outcome") == "rejected"
+        for record in records
+    )
+
+
+async def test_full_tool_budget_bounds_multi_step_handler(tmp_path) -> None:
+    import anyio
+
+    class SlowKube(FakeKube):
+        async def list_pods(self, namespace, label_selector, field_selector, limit):
+            await anyio.sleep(0.1)
+            return await super().list_pods(namespace, label_selector, field_selector, limit)
+
+    settings = make_settings(tmp_path, limits={"tool_budget_seconds": 0.01})
+    server = build_server(settings, SlowKube(), make_audit(settings))
+    result = await _call(server, "get_pods", {"namespace": "prod"})
+    assert result.isError
+    assert "tool timed out" in result.content[0].text
+
+
 async def test_list_namespaces_falls_back_to_individual_fetches(tmp_path) -> None:
     class NamespaceFallbackKube(FakeKube):
         async def list_namespaces(self):

@@ -13,10 +13,15 @@ no tool that can reach them.
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 import structlog
+import yaml
 
 from .audit import AuditLog
 from .config import Settings, load_settings
@@ -97,7 +102,107 @@ def list_approvals(settings: Settings) -> int:
     for record in records:
         state = "APPROVED (awaiting pickup)" if record.get("approved") else "PENDING"
         print(f"{record['id']}  {state}  {record['action']}")
+        print(f"  live state: {record.get('live_state', 'unavailable')}")
     return 0
+
+
+def _exec_auth_status(settings: Settings) -> dict[str, Any]:
+    configured = settings.kubeconfig
+    if configured is None:
+        configured = Path(os.environ.get("KUBECONFIG", "~/.kube/config").split(os.pathsep)[0])
+    path = configured.expanduser()
+    try:
+        raw = yaml.safe_load(path.read_text())
+        contexts = {item["name"]: item["context"] for item in raw.get("contexts", [])}
+        users = {item["name"]: item["user"] for item in raw.get("users", [])}
+        user_name = contexts[settings.context]["user"]
+        command = str((users[user_name].get("exec") or {}).get("command", ""))
+    except (OSError, KeyError, TypeError, ValueError):
+        return {"configured": False}
+    if not command:
+        return {"configured": False}
+    available = (
+        Path(command).is_file()
+        if Path(command).is_absolute()
+        else shutil.which(command) is not None
+    )
+    return {
+        "configured": True,
+        "command": Path(command).name,
+        "available": available,
+    }
+
+
+def _state_path_status(path: Path, *, directory: bool) -> dict[str, Any]:
+    target = path if directory else path.parent
+    probe = target
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    exists = target.exists()
+    mode = (target.stat().st_mode & 0o777) if exists else None
+    return {
+        "path": str(path),
+        "exists": exists,
+        "writable": os.access(probe, os.W_OK),
+        "private": mode is None or mode & 0o077 == 0,
+        "mode": f"{mode:03o}" if mode is not None else None,
+    }
+
+
+def doctor(
+    settings: Settings,
+    strict: bool,
+    json_output: bool,
+    kube: Any | None = None,
+) -> int:
+    """Run safe local configuration, RBAC, and filesystem diagnostics."""
+    if kube is None:
+        from .kube import KubeClient
+
+        kube = KubeClient(settings)
+    in_scope = ScopeGuard(settings.scope).namespaces()
+    enabled_write_tools = [] if settings.read_only else settings.write_tools.enabled
+    missing, overprivileged = kube.self_check(in_scope, enabled_write_tools)
+    exec_auth = _exec_auth_status(settings)
+    state_paths = {
+        "audit": _state_path_status(settings.audit_log, directory=False),
+        "approvals": _state_path_status(settings.approvals_dir, directory=True),
+    }
+    unsafe_paths = [name for name, status in state_paths.items() if not status["private"]]
+    unavailable_plugin = exec_auth.get("configured") and not exec_auth.get("available")
+    report = {
+        "ok": not missing
+        and not unavailable_plugin
+        and not (strict and (overprivileged or unsafe_paths)),
+        "context": settings.context,
+        "namespaces": in_scope,
+        "read_only": settings.read_only,
+        "write_tools": enabled_write_tools,
+        "missing_permissions": missing,
+        "overprivilege_warnings": overprivileged,
+        "exec_auth": exec_auth,
+        "state_paths": state_paths,
+    }
+    if json_output:
+        print(json.dumps(report, indent=2, sort_keys=True))
+    else:
+        print(f"context: {settings.context}")
+        print(f"namespaces: {', '.join(in_scope)}")
+        print(f"mode: {'read-only' if settings.read_only else 'bounded writes'}")
+        print(f"RBAC: {'ok' if not missing else 'missing permissions'}")
+        for item in missing:
+            print(f"  missing: {item}")
+        for warning in overprivileged:
+            print(f"  warning: {warning}")
+        if exec_auth.get("configured"):
+            state = "available" if exec_auth.get("available") else "NOT FOUND"
+            print(f"exec auth plugin: {exec_auth['command']} ({state})")
+        for name, status in state_paths.items():
+            privacy = "private" if status["private"] else f"mode {status['mode']}"
+            writable = "writable" if status["writable"] else "NOT WRITABLE"
+            print(f"{name} state: {privacy}, {writable}")
+        print(f"doctor: {'ok' if report['ok'] else 'problems found'}")
+    return 0 if report["ok"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -122,6 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     approvals_parser = sub.add_parser("approvals", help="list pending write approvals")
     approvals_parser.add_argument("--config", type=Path, default=None)
 
+    doctor_parser = sub.add_parser("doctor", help="validate context, RBAC, auth, and state paths")
+    doctor_parser.add_argument("--config", type=Path, default=None)
+    doctor_parser.add_argument("--strict", action="store_true")
+    doctor_parser.add_argument("--json", action="store_true", dest="json_output")
+
     args = parser.parse_args(argv)
 
     try:
@@ -138,6 +248,8 @@ def main(argv: list[str] | None = None) -> int:
         return approve(settings, args.approval_id)
     if args.command == "approvals":
         return list_approvals(settings)
+    if args.command == "doctor":
+        return doctor(settings, strict=args.strict, json_output=args.json_output)
 
     if getattr(args, "kubeconfig", None):
         settings = settings.model_copy(update={"kubeconfig": args.kubeconfig.expanduser()})

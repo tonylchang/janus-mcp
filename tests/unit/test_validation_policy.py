@@ -170,8 +170,12 @@ def test_store_pending_then_approved(tmp_path) -> None:
     assert state == "pending"
     assert matched == approval_id
     assert store.approve(approval_id) is not None
+    assert store.approve(approval_id) is not None
     state, _ = store.consume("rollout_restart", args)
     assert state == "approved"
+    assert store.approve(approval_id) is None
+    state, _ = store.consume("rollout_restart", args)
+    assert state == "none"
 
 
 def test_store_expiry(tmp_path) -> None:
@@ -180,6 +184,30 @@ def test_store_expiry(tmp_path) -> None:
     approval_id = store.create("rollout_restart", {"n": 1}, "restart")
     assert store.approve(approval_id) is None
     assert store.list_pending() == []
+
+
+def test_store_rejects_invalid_approval_id_and_uses_private_permissions(tmp_path) -> None:
+    store = ApprovalStore(tmp_path / "approvals", ttl_seconds=60)
+    approval_id = store.create("rollout_restart", {"n": 1}, "restart", "1/1 ready", "u:1")
+    assert store.approve("../../outside") is None
+    assert (tmp_path / "approvals").stat().st_mode & 0o777 == 0o700
+    assert (tmp_path / "approvals" / f"{approval_id}.json").stat().st_mode & 0o777 == 0o600
+    assert store.approve(approval_id) is not None
+    marker = tmp_path / "approvals" / f"{approval_id}.approved"
+    assert marker.stat().st_mode & 0o777 == 0o600
+
+
+def test_store_ignores_tampered_and_symlinked_records(tmp_path) -> None:
+    store = ApprovalStore(tmp_path / "approvals", ttl_seconds=60)
+    valid_id = store.create("rollout_restart", {"n": 1}, "restart")
+    outside = tmp_path / "outside.json"
+    outside.write_text('{"expires_at": 9999999999, "id": "aaaaaaaaaaaaaaaa"}')
+    (tmp_path / "approvals" / "aaaaaaaaaaaaaaaa.json").symlink_to(outside)
+    (tmp_path / "approvals" / "bbbbbbbbbbbbbbbb.json").write_text(
+        '{"expires_at": "forever", "id": "bbbbbbbbbbbbbbbb"}'
+    )
+    assert [record["id"] for record in store.list_pending()] == [valid_id]
+    assert outside.read_text() == '{"expires_at": 9999999999, "id": "aaaaaaaaaaaaaaaa"}'
 
 
 def test_approve_unknown_id(tmp_path) -> None:

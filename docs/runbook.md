@@ -29,6 +29,16 @@ The server refuses to start if the pinned `context` is missing from the
 kubeconfig, if required read permissions are absent, or (with `--strict`) if
 the credentials are over-privileged (can read Secrets).
 
+Run a safe preflight without starting the MCP transport:
+
+```bash
+janus-mcp doctor --strict
+janus-mcp doctor --json       # machine-readable capability report
+```
+
+The doctor checks the pinned context, namespace RBAC, exec-auth plugin
+availability, over-privilege, and local audit/approval path permissions.
+
 ## Register with an MCP client (example: Claude Desktop)
 
 `~/Library/Application Support/Claude/claude_desktop_config.json`:
@@ -58,6 +68,8 @@ janus-mcp approve <id>         # approve one
 
 Then tell the assistant to re-issue the call with the same arguments. Approvals
 expire (2.5× `approval_timeout_seconds`) and are burned on first use.
+Out-of-band records are bound to the exact arguments, resource UID, and
+`resourceVersion`; a changed or recreated target requires a new approval.
 
 Current bounded remediation tools:
 
@@ -106,9 +118,11 @@ write_tools:
 
 ## Audit
 
-Every call is one JSONL record in `~/.local/state/janus-mcp/audit.jsonl`
-(rotated at 10 MiB): timestamp, tool, identifier args, scope/approval
-decisions, redaction counts. Bodies are never logged.
+Every accepted tool invocation emits a `tool_result` JSONL record in
+`~/.local/state/janus-mcp/audit.jsonl` (rotated at 10 MiB). Successful calls
+also record sanitized identifier arguments and redaction counts; write flows
+record approval decisions. Bodies are never logged. The directory and files
+are forced to operator-only permissions.
 
 ```bash
 jq 'select(.event=="write_approved")' ~/.local/state/janus-mcp/audit.jsonl

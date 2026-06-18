@@ -7,6 +7,9 @@ keeps Janus releases aligned with the project threat model.
 
 - Run `uv run pytest`, including the security suite and frame-capture leak test.
 - Run `uv run ruff check . && uv run ruff format --check . && uv run mypy`.
+- Confirm the CI matrix passes on Python 3.12 and 3.13 and the built wheel
+  succeeds in an isolated CLI smoke test.
+- Confirm Gitleaks and OSV dependency scanning pass.
 - If redaction behavior changed, regenerate goldens with `UPDATE_GOLDENS=1`,
   then review the diff for leaks and over-redaction before committing.
 - Review the diff for new Kubernetes access paths. `kube.py` should remain the
@@ -20,7 +23,8 @@ keeps Janus releases aligned with the project threat model.
 
 ## Distribution targets
 
-- Publish signed GitHub release artifacts.
+- Publish GitHub release artifacts with GitHub build provenance attestations.
+- Attach an SPDX JSON SBOM to every GitHub release.
 - Publish Python wheels and sdists with Trusted Publishing provenance.
 - Publish a container image only after the image has an SBOM and vulnerability
   scan attached.

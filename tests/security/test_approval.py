@@ -144,6 +144,57 @@ async def test_oob_bait_and_switch_rejected(tmp_path) -> None:
         assert kube.calls_for("scale") == []
 
 
+async def test_oob_approval_is_rejected_when_live_state_changes(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    store = ApprovalStore(settings.approvals_dir, ttl_seconds=300)
+
+    async with connect(server) as client:
+        first = await client.call_tool("scale_deployment", SCALE_ARGS)
+        approval_id = first.content[0].text.split("approval_id=")[1].split()[0]
+        store.approve(approval_id)
+        kube.scale_state = type(kube.scale_state)(
+            kind="Deployment",
+            name="payments-api",
+            namespace="prod",
+            replicas=9,
+            ready_replicas=9,
+            resource_version="12346",
+            uid=kube.scale_state.uid,
+        )
+
+        result = await client.call_tool("scale_deployment", SCALE_ARGS)
+        assert "status=pending" in result.content[0].text
+        assert "9/9 ready" in result.content[0].text
+        assert kube.calls_for("scale") == []
+
+
+async def test_rollout_restart_stale_resource_version_conflicts(tmp_path) -> None:
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    real_get_object = kube.get_object
+
+    async def stale_get_object(kind, name, namespace):
+        obj = await real_get_object(kind, name, namespace)
+        kube.deployment["metadata"]["resourceVersion"] = "991101"
+        return obj
+
+    kube.get_object = stale_get_object  # type: ignore[method-assign]
+    args = {
+        "kind": "Deployment",
+        "name": "payments-api",
+        "namespace": "prod",
+        "reason": "recover service",
+    }
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        result = await client.call_tool("rollout_restart", args)
+    assert result.isError
+    assert "conflict" in result.content[0].text
+    assert len(kube.calls_for("rollout_restart")) == 1
+
+
 async def test_stale_resource_version_conflicts_safely(tmp_path) -> None:
     """If the object changes between the fresh read and the patch, the write
     aborts with a typed conflict instead of retrying blindly."""

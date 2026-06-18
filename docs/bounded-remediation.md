@@ -33,15 +33,18 @@ approved from a compact live-state card.
 
 ## Safe read-only expansions
 
-These make Janus more useful without widening authority:
+Janus now includes these read-only diagnostic expansions:
 
-- `rollout_status` and `rollout_history`
-- HPA target/current metric summary
-- PVC binding and storage pressure summary
-- image pull diagnosis
-- probe failure diagnosis
+- `rollout_status` and Deployment `rollout_history`
+- `namespace_health`, including HPA replica and PVC binding summaries
+- `diagnose_pod` for image-pull, probe, crash, and scheduling evidence
+- the `diagnose_namespace` MCP prompt workflow
+
+Further read-only candidates:
+
+- HPA target/current metric details
+- storage pressure diagnosis
 - node pressure summary when cluster-scoped resources are enabled
-- namespace health report that composes pods, events, deployments, HPAs, and PVCs
 
 ## Design rules
 

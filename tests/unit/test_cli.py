@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import yaml
 
 from janus_mcp import cli
@@ -63,3 +65,35 @@ def test_cli_main_kubeconfig_override(tmp_path, monkeypatch) -> None:
     assert result == 0
     assert captured["kubeconfig"] == kubeconfig_path
     assert captured["strict"] is True
+
+
+def test_doctor_json_reports_safe_capabilities(tmp_path, capsys) -> None:
+    class HealthyKube:
+        def self_check(self, namespaces, write_tools):
+            assert namespaces == ["prod", "staging"]
+            return [], []
+
+    settings = make_settings(tmp_path)
+    assert cli.doctor(settings, strict=True, json_output=True, kube=HealthyKube()) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is True
+    assert report["context"] == "limited-sa@test-cluster"
+    assert report["missing_permissions"] == []
+
+
+def test_doctor_strict_rejects_overprivileged_credentials(tmp_path, capsys) -> None:
+    class OverprivilegedKube:
+        def self_check(self, namespaces, write_tools):
+            return [], ["credentials can read Secrets in prod"]
+
+    settings = make_settings(tmp_path)
+    assert (
+        cli.doctor(
+            settings,
+            strict=True,
+            json_output=False,
+            kube=OverprivilegedKube(),
+        )
+        == 1
+    )
+    assert "problems found" in capsys.readouterr().out

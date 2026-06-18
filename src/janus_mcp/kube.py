@@ -15,7 +15,7 @@ Two rules keep this module honest:
 from __future__ import annotations
 
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -71,17 +71,33 @@ class ScaleInfo:
     replicas: int
     ready_replicas: int
     resource_version: str
+    uid: str = ""
 
     def summary(self) -> str:
         return (
             f"{self.kind} {self.namespace}/{self.name}: {self.ready_replicas}/{self.replicas} ready"
         )
 
+    def state_token(self) -> str:
+        return f"{self.uid}:{self.resource_version}"
+
+
+@dataclass
+class KubePage:
+    items: list[dict[str, Any]]
+    partial: bool = False
+
+    def __iter__(self) -> Iterator[dict[str, Any]]:
+        return iter(self.items)
+
+    def __len__(self) -> int:
+        return len(self.items)
+
 
 class KubeApi(Protocol):
     """The surface server.py programs against; tests substitute a fake."""
 
-    async def list_namespaces(self) -> list[dict[str, Any]]: ...
+    async def list_namespaces(self) -> KubePage: ...
     async def get_namespace(self, name: str) -> dict[str, Any]: ...
     async def list_pods(
         self,
@@ -89,10 +105,10 @@ class KubeApi(Protocol):
         label_selector: str | None,
         field_selector: str | None,
         limit: int,
-    ) -> list[dict[str, Any]]: ...
+    ) -> KubePage: ...
     async def list_events(
         self, namespace: str, field_selector: str | None, limit: int
-    ) -> list[dict[str, Any]]: ...
+    ) -> KubePage: ...
     async def get_object(self, kind: str, name: str, namespace: str | None) -> dict[str, Any]: ...
     async def read_pod_log(
         self,
@@ -103,15 +119,23 @@ class KubeApi(Protocol):
         since_seconds: int | None,
         previous: bool,
     ) -> str: ...
-    async def list_deployments(self, namespace: str) -> list[dict[str, Any]]: ...
-    async def list_nodes(self) -> list[dict[str, Any]]: ...
+    async def list_deployments(self, namespace: str) -> KubePage: ...
+    async def list_replica_sets(self, namespace: str, limit: int) -> KubePage: ...
+    async def list_hpas(self, namespace: str, limit: int) -> KubePage: ...
+    async def list_pvcs(self, namespace: str, limit: int) -> KubePage: ...
+    async def list_nodes(self) -> KubePage: ...
     async def server_version(self) -> str: ...
     async def get_scale(self, kind: str, name: str, namespace: str) -> ScaleInfo: ...
     async def scale(
         self, kind: str, name: str, namespace: str, replicas: int, expected_resource_version: str
     ) -> ScaleInfo: ...
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]: ...
     async def set_deployment_paused(
         self,
@@ -200,9 +224,36 @@ class KubeClient:
         except Exception as exc:
             raise _map_api_error(exc, what) from None
 
-    async def list_namespaces(self) -> list[dict[str, Any]]:
-        result = await self._call("namespaces", self._core.list_namespace)
-        return [self._to_dict(item) for item in result.items]
+    async def _list_bounded(
+        self,
+        what: str,
+        fn: Callable[..., Any],
+        /,
+        *args: Any,
+        limit: int,
+        **kwargs: Any,
+    ) -> KubePage:
+        items: list[dict[str, Any]] = []
+        continue_token: str | None = None
+        seen_tokens: set[str] = set()
+        pages = 0
+        target = limit + 1
+        while len(items) < target and pages < 20:
+            request = dict(kwargs)
+            request["limit"] = min(200, target - len(items))
+            if continue_token:
+                request["_continue"] = continue_token
+            result = await self._call(what, fn, *args, **request)
+            pages += 1
+            items.extend(self._to_dict(item) for item in result.items)
+            continue_token = str(getattr(result.metadata, "_continue", "") or "")
+            if not continue_token or continue_token in seen_tokens:
+                break
+            seen_tokens.add(continue_token)
+        return KubePage(items=items[:limit], partial=len(items) > limit or bool(continue_token))
+
+    async def list_namespaces(self) -> KubePage:
+        return await self._list_bounded("namespaces", self._core.list_namespace, limit=500)
 
     async def get_namespace(self, name: str) -> dict[str, Any]:
         result = await self._call(f"namespace {name}", self._core.read_namespace, name)
@@ -214,27 +265,31 @@ class KubeClient:
         label_selector: str | None,
         field_selector: str | None,
         limit: int,
-    ) -> list[dict[str, Any]]:
-        kwargs: dict[str, Any] = {"limit": limit}
+    ) -> KubePage:
+        kwargs: dict[str, Any] = {}
         if label_selector:
             kwargs["label_selector"] = label_selector
         if field_selector:
             kwargs["field_selector"] = field_selector
-        result = await self._call(
-            f"pods in {namespace}", self._core.list_namespaced_pod, namespace, **kwargs
+        return await self._list_bounded(
+            f"pods in {namespace}",
+            self._core.list_namespaced_pod,
+            namespace,
+            limit=limit,
+            **kwargs,
         )
-        return [self._to_dict(item) for item in result.items]
 
-    async def list_events(
-        self, namespace: str, field_selector: str | None, limit: int
-    ) -> list[dict[str, Any]]:
-        kwargs: dict[str, Any] = {"limit": limit}
+    async def list_events(self, namespace: str, field_selector: str | None, limit: int) -> KubePage:
+        kwargs: dict[str, Any] = {}
         if field_selector:
             kwargs["field_selector"] = field_selector
-        result = await self._call(
-            f"events in {namespace}", self._core.list_namespaced_event, namespace, **kwargs
+        return await self._list_bounded(
+            f"events in {namespace}",
+            self._core.list_namespaced_event,
+            namespace,
+            limit=limit,
+            **kwargs,
         )
-        return [self._to_dict(item) for item in result.items]
 
     async def get_object(self, kind: str, name: str, namespace: str | None) -> dict[str, Any]:
         reader = self._readers.get(kind)
@@ -276,15 +331,40 @@ class KubeClient:
         )
         return str(result)
 
-    async def list_deployments(self, namespace: str) -> list[dict[str, Any]]:
-        result = await self._call(
-            f"deployments in {namespace}", self._apps.list_namespaced_deployment, namespace
+    async def list_deployments(self, namespace: str) -> KubePage:
+        return await self._list_bounded(
+            f"deployments in {namespace}",
+            self._apps.list_namespaced_deployment,
+            namespace,
+            limit=200,
         )
-        return [self._to_dict(item) for item in result.items]
 
-    async def list_nodes(self) -> list[dict[str, Any]]:
-        result = await self._call("nodes", self._core.list_node)
-        return [self._to_dict(item) for item in result.items]
+    async def list_replica_sets(self, namespace: str, limit: int) -> KubePage:
+        return await self._list_bounded(
+            f"replica sets in {namespace}",
+            self._apps.list_namespaced_replica_set,
+            namespace,
+            limit=limit,
+        )
+
+    async def list_hpas(self, namespace: str, limit: int) -> KubePage:
+        return await self._list_bounded(
+            f"horizontal pod autoscalers in {namespace}",
+            self._autoscaling.list_namespaced_horizontal_pod_autoscaler,
+            namespace,
+            limit=limit,
+        )
+
+    async def list_pvcs(self, namespace: str, limit: int) -> KubePage:
+        return await self._list_bounded(
+            f"persistent volume claims in {namespace}",
+            self._core.list_namespaced_persistent_volume_claim,
+            namespace,
+            limit=limit,
+        )
+
+    async def list_nodes(self) -> KubePage:
+        return await self._list_bounded("nodes", self._core.list_node, limit=500)
 
     async def server_version(self) -> str:
         info = await self._call("server version", self._version.get_code)
@@ -316,6 +396,7 @@ class KubeClient:
             replicas=scale.spec.replicas or 0,
             ready_replicas=scale.status.replicas or 0,
             resource_version=scale.metadata.resource_version,
+            uid=scale.metadata.uid or "",
         )
 
     async def scale(
@@ -337,10 +418,16 @@ class KubeClient:
             replicas=scale.spec.replicas or 0,
             ready_replicas=scale.status.replicas or 0,
             resource_version=scale.metadata.resource_version,
+            uid=scale.metadata.uid or "",
         )
 
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]:
         patchers: dict[str, Callable[..., Any]] = {
             "Deployment": self._apps.patch_namespaced_deployment,
@@ -352,13 +439,14 @@ class KubeClient:
             raise KubeError(f"kind '{kind}' does not support rollout restart")
         now = datetime.now(UTC).isoformat()
         body = {
+            "metadata": {"resourceVersion": expected_resource_version},
             "spec": {
                 "template": {
                     "metadata": {
                         "annotations": {RESTART_ANNOTATION: now, REASON_ANNOTATION: reason}
                     }
                 }
-            }
+            },
         }
         what = f"{kind} {namespace}/{name}"
         result = await self._call(what, patcher, name, namespace, body)
@@ -409,11 +497,38 @@ class KubeClient:
         """Returns (missing capabilities, over-privilege warnings)."""
         missing: list[str] = []
         overprivileged: list[str] = []
-        read_probes = [("pods", "list"), ("events", "list"), ("pods/log", "get")]
+        read_probes = [
+            (None, "pods", "list"),
+            (None, "pods", "get"),
+            (None, "events", "list"),
+            (None, "pods/log", "get"),
+            (None, "services", "get"),
+            (None, "configmaps", "get"),
+            (None, "persistentvolumeclaims", "get"),
+            (None, "persistentvolumeclaims", "list"),
+            ("apps", "deployments", "get"),
+            ("apps", "deployments", "list"),
+            ("apps", "replicasets", "get"),
+            ("apps", "replicasets", "list"),
+            ("apps", "statefulsets", "get"),
+            ("apps", "daemonsets", "get"),
+            ("batch", "jobs", "get"),
+            ("batch", "cronjobs", "get"),
+            ("networking.k8s.io", "ingresses", "get"),
+            ("autoscaling", "horizontalpodautoscalers", "get"),
+            ("autoscaling", "horizontalpodautoscalers", "list"),
+        ]
         write_tools = set(enabled_write_tools)
         for ns in namespaces:
-            for resource, verb in read_probes:
-                if not self._ssar(namespace=ns, resource=resource, verb=verb):
+            for group, resource, verb in read_probes:
+                attrs: dict[str, Any] = {
+                    "namespace": ns,
+                    "resource": resource,
+                    "verb": verb,
+                }
+                if group:
+                    attrs["group"] = group
+                if not self._ssar(**attrs):
                     missing.append(f"{verb} {resource} in {ns}")
             if write_tools.intersection(
                 {"rollout_restart", "pause_rollout", "resume_rollout"}
