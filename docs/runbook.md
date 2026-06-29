@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Operator runbook
+description: Install, least-privilege RBAC, the write-approval workflow, the audit log, and troubleshooting for janus-mcp.
+---
+
 # Operator runbook
 
 ## Install

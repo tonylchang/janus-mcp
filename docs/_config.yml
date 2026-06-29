@@ -1,0 +1,10 @@
+# GitHub Pages config — source: main / docs.
+# Plain Jekyll, no theme gem: the custom _layouts/doc.html matches the
+# landing page styling. index.html has no front matter, so it is served
+# verbatim as the site root. The three docs use `layout: doc`.
+title: Janus
+description: A local MCP server that gives LLMs scoped, redacted access to Kubernetes.
+markdown: kramdown
+kramdown:
+  input: GFM
+  syntax_highlighter: rouge

@@ -1,3 +1,9 @@
+---
+layout: doc
+title: Quick start
+description: Zero to a safe Kubernetes copilot — install janus-mcp, pin a context, and register it with your MCP client.
+---
+
 # Quick start
 
 Shortest path from zero to asking an AI assistant about your cluster, with the
@@ -48,7 +54,7 @@ janus-mcp serve   # should print warnings (if any) and wait; Ctrl-C to stop
 It refuses to start with a clear message if the context is missing or
 permissions are absent. An "over-privileged credentials" warning means your
 kubeconfig can read Secrets — janus-mcp never will, but see
-[the runbook](runbook.md) for the least-privilege ServiceAccount setup.
+[the runbook](runbook.html) for the least-privilege ServiceAccount setup.
 
 ## 3. Register with your MCP client
 
