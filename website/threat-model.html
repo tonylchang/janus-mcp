@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Threat model — Janus MCP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="/css/styles.css">
+<script src="/js/_ds_bundle.js"></script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { margin: 0; text-wrap: pretty; background: var(--color-bg); }
+  a { color: var(--color-accent-700); text-underline-offset: 3px; }
+  a:hover { color: var(--color-accent); }
+  [data-theme="dark"] .btn-primary { color: #fff; }
+  :root[data-theme="dark"], [data-theme="dark"] {
+    --color-accent-100: #3a1a12;
+    --color-accent-800: #ffc4b8;
+    --color-neutral-100: #2a2726;
+    --color-neutral-200: #3a3736;
+    --color-neutral-800: #e6e3e2;
+    --color-bg: #1a1918;
+    --color-surface: #262322;
+    --color-text: #f1efee;
+    --color-divider: color-mix(in srgb, #f1efee 42%, transparent);
+    --color-accent-700: #ff9783;
+  }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 17px; line-height: 1.65; min-height: 100vh;">
+
+  <nav class="nav" style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); padding-inline: clamp(20px, 5vw, 72px); gap: 24px;">
+    <a class="nav-brand" href="/" style="letter-spacing: -0.01em; text-decoration: none; color: inherit;">JANUS<span style="color: var(--color-accent);">·</span>MCP</a>
+    <a href="/quick-start">Quick start</a>
+    <a href="/operator-runbook">Runbook</a>
+    <a href="/threat-model" aria-current="page">Threat model</a>
+    <a href="/least-privilege-rbac">RBAC</a>
+    <div style="display: flex; border: 1px solid var(--color-divider);">
+      <button onClick="{{ pickSystem }}" style="{{ themeSystem }}">System</button>
+      <button onClick="{{ pickLight }}" style="{{ themeLight }}">Light</button>
+      <button onClick="{{ pickDark }}" style="{{ themeDark }}">Dark</button>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="justify-content: flex-start;">GitHub</a>
+  </nav>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 72px);">
+    <header style="padding: clamp(44px, 6vw, 76px) 0 clamp(28px, 4vw, 40px);">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 20px;">Documentation</div>
+      <h1 style="font-size: clamp(38px, 5vw, 64px); line-height: 1.06; letter-spacing: -0.022em; margin: 0 0 0 -0.05em;">Threat model</h1>
+      <p style="max-width: 62ch; margin: 24px 0 0; font-size: 19px; line-height: 1.6;">The five security invariants, the attack surfaces they close, and how CI verifies that none of them quietly regress.</p>
+    </header>
+    <hr class="hr" style="margin: 0;">
+
+    <div style="display: flex; flex-wrap: wrap; gap: 0 clamp(32px, 5vw, 72px); padding-bottom: 20px;">
+      <aside style="flex: 0 0 190px; padding: 28px 0 0;">
+        <div style="position: sticky; top: 96px; display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+          <span style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">On this page</span>
+          <a href="#asset" style="text-decoration: none;">What is protected</a>
+          <a href="#invariants" style="text-decoration: none;">Security invariants</a>
+          <a href="#surfaces" style="text-decoration: none;">Attack surfaces</a>
+          <a href="#non-goals" style="text-decoration: none;">Non-goals</a>
+          <a href="#residual" style="text-decoration: none;">Residual risks</a>
+        </div>
+      </aside>
+
+      <main style="flex: 1 1 460px; max-width: 72ch; padding: 28px 0 clamp(40px, 6vw, 64px); min-width: 0;">
+        <section id="asset">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">What is protected</h2>
+          <p style="margin: 0 0 16px;">The asset is cluster credential material and Secret contents: the kubeconfig (API server URL, CA data, client certificates, bearer tokens), Kubernetes <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">Secret</code> objects, and any secret values that leak into adjacent places such as env values, annotations, ConfigMaps and workload stdout.</p>
+          <p style="margin: 0;">The adversary of record is the LLM's context window. Anything that crosses the MCP boundary may be logged, retained or exfiltrated by whatever sits on the other side, so the only winning move is to never put secrets there.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="invariants">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Security invariants</h2>
+          <p style="margin: 0 0 16px;">Enforced by construction, verified in CI.</p>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 16px; padding: 18px 0; border-top: 1px solid var(--color-divider);">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--color-accent-700);">01</div>
+            <div>
+              <h3 style="font-size: 19px; margin: 0 0 6px;">Credentials stay in server memory</h3>
+              <p style="margin: 0; font-size: 16px; line-height: 1.6;">The kubeconfig is loaded in-process against a pinned context and is never serialized into an MCP frame, tool description, log line or error message. The frame-capture leak test records every JSON-RPC frame of a full scripted session and greps for canaries and kubeconfig markers: zero hits, or the build fails.</p>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 16px; padding: 18px 0; border-top: 1px solid var(--color-divider);">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--color-accent-700);">02</div>
+            <div>
+              <h3 style="font-size: 19px; margin: 0 0 6px;">Secrets are unreadable by design</h3>
+              <p style="margin: 0; font-size: 16px; line-height: 1.6;"><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">Secret</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">ServiceAccount</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">CertificateSigningRequest</code> and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">TokenReview</code> have no entry in the kind registry, so the server never fetches them and cannot leak them. Asking for one returns a policy error with zero API calls.</p>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 16px; padding: 18px 0; border-top: 1px solid var(--color-divider);">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--color-accent-700);">03</div>
+            <div>
+              <h3 style="font-size: 19px; margin: 0 0 6px;">Everything model-visible passes redaction</h3>
+              <p style="margin: 0; font-size: 16px; line-height: 1.6;">Three layers: structural per-kind field rules, pattern and entropy scrubbing of all free text, and output shaping with byte caps. Failures fail closed: a redaction exception returns a generic error, never the payload.</p>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 16px; padding: 18px 0; border-top: 1px solid var(--color-divider);">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--color-accent-700);">04</div>
+            <div>
+              <h3 style="font-size: 19px; margin: 0 0 6px;">Writes need out-of-model human approval</h3>
+              <p style="margin: 0; font-size: 16px; line-height: 1.6;">A model-supplied parameter is never consent. Approval arrives via MCP elicitation or the out-of-band CLI, which binds a SHA-256 hash of the exact arguments to the approval id and burns each approval on first use.</p>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 6px 16px; padding: 18px 0; border-top: 1px solid var(--color-divider);">
+            <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; color: var(--color-accent-700);">05</div>
+            <div>
+              <h3 style="font-size: 19px; margin: 0 0 6px;">Scope is enforced server-side on every call</h3>
+              <p style="margin: 0; font-size: 16px; line-height: 1.6;">Independent of RBAC: namespace allow and deny lists (deny wins), cluster-scope opt-in, kubeconfig context pinning, with the least-privilege RBAC manifests as a second independent layer.</p>
+            </div>
+          </div>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="surfaces">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Attack surfaces and mitigations</h2>
+          <div style="overflow: auto; margin-bottom: 16px;">
+            <table class="table">
+              <thead><tr><th style="width: 38%;">Vector</th><th>Mitigation</th></tr></thead>
+              <tbody>
+                <tr><td>Reading <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">Secret</code> objects</td><td>No code path can fetch them (invariant 2)</td></tr>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">last-applied-configuration</code> annotations, which embed the full prior object</td><td>Dropped unconditionally, never allowlistable</td></tr>
+                <tr><td>Env values, ConfigMap data, credential-bearing annotations</td><td>Structural masking; references such as <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">secretKeyRef</code> shown by name only</td></tr>
+                <tr><td>Credentials echoed into logs or events by workloads</td><td>Pattern and entropy scrubber with typed replacement tokens</td></tr>
+                <tr><td>Prompt injection via log or event text</td><td>Writes always require human approval; untrusted-output framing; static tool descriptions; the approval card shows live state fetched at approval time</td></tr>
+                <tr><td>Approval bait-and-switch (approve A, execute B)</td><td>Argument-hash binding, burn on use, and a fresh-read <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">resourceVersion</code> carried in the patch (409 on conflict)</td></tr>
+                <tr><td>Secret-probing via grep match counts</td><td>grep filters after redaction</td></tr>
+                <tr><td>Masked-value probing via field selectors</td><td>Field selectors are allowlisted per tool; masked fields are not filterable</td></tr>
+                <tr><td>Error messages leaking the API server URL</td><td>All client exceptions mapped to typed generic messages; details go to local stderr only</td></tr>
+                <tr><td>Enumeration via not-found errors</td><td>Names validated and scope-checked before any API call</td></tr>
+                <tr><td>Command injection</td><td>No shell-outs anywhere; the Kubernetes client library is the only egress; <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">subprocess</code> is never imported</td></tr>
+                <tr><td>Over-privileged kubeconfig</td><td>Startup access-review probe warns loudly, and refuses under <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">--strict</code>, if the credentials can read Secrets</td></tr>
+                <tr><td>API server abuse and exfiltration bandwidth</td><td>Per-tool and global token buckets, request timeouts, result byte caps</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="non-goals">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Non-goals in v1</h2>
+          <ul style="margin: 0 0 16px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px;">
+            <li>No <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">exec</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">attach</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">port-forward</code> or <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">cp</code>.</li>
+            <li>No Secret reads under any circumstances.</li>
+            <li>Not a general kubectl replacement.</li>
+            <li>A single-operator local trust domain: stdio transport, no network listener, no multi-tenant auth.</li>
+          </ul>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="residual">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Residual risks</h2>
+          <ul style="margin: 0 0 16px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px;">
+            <li>The entropy scrubber has false positives on long high-entropy identifiers and false negatives on low-entropy secrets outside key=value shapes. Tune <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">redaction.entropy_threshold</code>, never disable the pass.</li>
+            <li>Namespace and resource names in scope are visible to the model by design. If the names themselves are sensitive, scope them out.</li>
+            <li>A hostile workload can still spam misleading diagnostics. The payoff is capped at a human-read approval card, but human attention is the last line of defense: read the card.</li>
+          </ul>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <footer style="background: var(--color-accent); color: #fff;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: clamp(36px, 5vw, 52px) clamp(20px, 5vw, 72px) clamp(28px, 4vw, 40px);">
+      <div style="display: flex; flex-wrap: nowrap; gap: 8px; overflow: auto;">
+        <a class="btn" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="background: #fff; color: #ae1800; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Clone the repo</a>
+        <a class="btn" href="/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start</a>
+        <a class="btn" href="/operator-runbook" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Operator runbook</a>
+        <a class="btn" href="/least-privilege-rbac" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Least-privilege RBAC</a>
+        <a class="btn" href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">About MCP</a>
+      </div>
+      <div style="height: 2px; background: rgba(255,255,255,0.35); margin: clamp(28px, 4vw, 40px) 0 22px;"></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: baseline; font-size: 14px;">
+        <a href="/" style="font-family: var(--font-heading); font-weight: 800; margin-right: auto; color: #fff; text-decoration: none;">JANUS·MCP</a>
+        <span style="color: rgba(255,255,255,0.75);">MIT licensed, in active development</span>
+      </div>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    let saved = null;
+    try { saved = localStorage.getItem('janus-site-theme'); } catch (e) {}
+    if (saved === 'dark' || saved === 'light' || saved === 'system') this.setState({ mode: saved });
+    if (window.matchMedia) {
+      this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+      this.onMq = () => { if ((this.state.mode || 'system') === 'system') this.forceUpdate(); };
+      this.mq.addEventListener('change', this.onMq);
+    }
+    this.syncRoot();
+  }
+
+  componentDidUpdate() { this.syncRoot(); }
+  componentWillUnmount() { if (this.mq) this.mq.removeEventListener('change', this.onMq); }
+
+  syncRoot() { try { document.documentElement.setAttribute('data-theme', this.theme); } catch (e) {} }
+
+  get mode() { return (this.state && this.state.mode) || 'system'; }
+
+  get theme() {
+    if (this.mode !== 'system') return this.mode;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  themeStyle(mode) {
+    const on = this.mode === mode;
+    return 'appearance:none;border:0;cursor:pointer;font-family:var(--font-body);font-weight:600;'
+      + 'font-size:12px;letter-spacing:0.04em;padding:6px 11px;white-space:nowrap;'
+      + (mode === 'dark' ? '' : 'border-right:1px solid var(--color-divider);')
+      + (on ? 'background:var(--color-accent);color:#fff;' : 'background:transparent;color:color-mix(in srgb, var(--color-text) 65%, transparent);');
+  }
+
+  pickTheme(mode) {
+    return () => {
+      this.setState({ mode: mode });
+      try { localStorage.setItem('janus-site-theme', mode); } catch (e) {}
+    };
+  }
+
+  renderVals() {
+    return {
+      theme: this.theme,
+      themeSystem: this.themeStyle('system'), themeLight: this.themeStyle('light'), themeDark: this.themeStyle('dark'),
+      pickSystem: this.pickTheme('system'), pickLight: this.pickTheme('light'), pickDark: this.pickTheme('dark')
+    };
+  }
+}
+</script>
+</body>
+</html>

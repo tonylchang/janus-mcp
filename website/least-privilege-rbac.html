@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Least-privilege RBAC — Janus MCP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="/css/styles.css">
+<script src="/js/_ds_bundle.js"></script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { margin: 0; text-wrap: pretty; background: var(--color-bg); }
+  a { color: var(--color-accent-700); text-underline-offset: 3px; }
+  a:hover { color: var(--color-accent); }
+  [data-theme="dark"] .btn-primary { color: #fff; }
+  :root[data-theme="dark"], [data-theme="dark"] {
+    --color-accent-100: #3a1a12;
+    --color-accent-800: #ffc4b8;
+    --color-neutral-100: #2a2726;
+    --color-neutral-200: #3a3736;
+    --color-neutral-800: #e6e3e2;
+    --color-bg: #1a1918;
+    --color-surface: #262322;
+    --color-text: #f1efee;
+    --color-divider: color-mix(in srgb, #f1efee 42%, transparent);
+    --color-accent-700: #ff9783;
+  }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 17px; line-height: 1.65; min-height: 100vh;">
+
+  <nav class="nav" style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); padding-inline: clamp(20px, 5vw, 72px); gap: 24px;">
+    <a class="nav-brand" href="/" style="letter-spacing: -0.01em; text-decoration: none; color: inherit;">JANUS<span style="color: var(--color-accent);">·</span>MCP</a>
+    <a href="/quick-start">Quick start</a>
+    <a href="/operator-runbook">Runbook</a>
+    <a href="/threat-model">Threat model</a>
+    <a href="/least-privilege-rbac" aria-current="page">RBAC</a>
+    <div style="display: flex; border: 1px solid var(--color-divider);">
+      <button onClick="{{ pickSystem }}" style="{{ themeSystem }}">System</button>
+      <button onClick="{{ pickLight }}" style="{{ themeLight }}">Light</button>
+      <button onClick="{{ pickDark }}" style="{{ themeDark }}">Dark</button>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="justify-content: flex-start;">GitHub</a>
+  </nav>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 72px);">
+    <header style="padding: clamp(44px, 6vw, 76px) 0 clamp(28px, 4vw, 40px);">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 20px;">Documentation</div>
+      <h1 style="font-size: clamp(38px, 5vw, 64px); line-height: 1.06; letter-spacing: -0.022em; margin: 0 0 0 -0.05em;">Least-privilege RBAC</h1>
+      <p style="max-width: 62ch; margin: 24px 0 0; font-size: 19px; line-height: 1.6;">The shipped manifests give janus-mcp its own ServiceAccount with read verbs on a handful of kinds, in named namespaces only. Note what is absent: Secrets, nowhere, ever.</p>
+    </header>
+    <hr class="hr" style="margin: 0;">
+
+    <div style="display: flex; flex-wrap: wrap; gap: 0 clamp(32px, 5vw, 72px); padding-bottom: 20px;">
+      <aside style="flex: 0 0 190px; padding: 28px 0 0;">
+        <div style="position: sticky; top: 96px; display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+          <span style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">On this page</span>
+          <a href="#why" style="text-decoration: none;">Why a second layer</a>
+          <a href="#grants" style="text-decoration: none;">What it grants</a>
+          <a href="#absent" style="text-decoration: none;">What is absent</a>
+          <a href="#apply" style="text-decoration: none;">Apply it</a>
+          <a href="#write" style="text-decoration: none;">Optional write role</a>
+          <a href="#verify" style="text-decoration: none;">Verify</a>
+          <a href="#bind" style="text-decoration: none;">Bind a context</a>
+        </div>
+      </aside>
+
+      <main style="flex: 1 1 460px; max-width: 72ch; padding: 28px 0 clamp(40px, 6vw, 64px); min-width: 0;">
+        <section id="why">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Why a second layer</h2>
+          <p style="margin: 0 0 16px;">Server-side scope already blocks out-of-policy calls before they reach the API server: allow and deny namespace lists, cluster-scope opt-in, a pinned context. RBAC is the independent layer underneath, enforced by Kubernetes rather than by this process.</p>
+          <p style="margin: 0;">If a bug ever let a call slip past ScopeGuard, the credential still cannot read a Secret, patch an unlisted kind, or touch a namespace outside its Role bindings. Two mechanisms, one outcome, no shared failure mode.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="grants">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">What the manifests grant</h2>
+          <p style="margin: 0 0 16px;">A ServiceAccount in its own <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">janus-mcp</code> namespace, one narrow ClusterRole, and a per-namespace Role bound to it.</p>
+          <div style="overflow: auto; margin-bottom: 16px;">
+            <table class="table">
+              <thead><tr><th style="width: 24%;">Scope</th><th>Resources</th><th style="width: 18%;">Verbs</th></tr></thead>
+              <tbody>
+                <tr><td>Cluster-wide</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">namespaces</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, core</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">pods</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">pods/log</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">events</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">services</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">configmaps</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">persistentvolumeclaims</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, apps</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">deployments</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">replicasets</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">statefulsets</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">daemonsets</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, batch</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">jobs</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">cronjobs</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, networking</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">ingresses</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, autoscaling</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">horizontalpodautoscalers</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+                <tr><td>Per namespace, events.k8s.io</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">events</code></td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">get</code> <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">list</code></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="margin: 0;">Repeat the Role and RoleBinding pair for every namespace in <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">scope.allowed_namespaces</code>. A namespace with no Role is invisible twice over: server-side scope refuses it, and the credential could not read it anyway.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="absent">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">What is absent, deliberately</h2>
+          <p style="margin: 0 0 16px;">The absence is the control. These are not filtered at runtime; they were never granted.</p>
+          <ul style="margin: 0 0 16px; padding-left: 22px; display: flex; flex-direction: column; gap: 10px;">
+            <li><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">secrets</code> in any namespace, in any verb. Nowhere, ever.</li>
+            <li><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">serviceaccounts</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">certificatesigningrequests</code> and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">tokenreviews</code>, the adjacent credential-bearing kinds.</li>
+            <li><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">create</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">delete</code> and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">deletecollection</code> on everything.</li>
+            <li><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">pods/exec</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">pods/attach</code> and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">pods/portforward</code>, the shell-shaped subresources.</li>
+            <li>Node and other cluster-scoped reads beyond <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">namespaces</code>; those stay behind <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">allow_cluster_scoped</code> as well.</li>
+          </ul>
+          <p style="margin: 0;">If the credential you point janus-mcp at can read Secrets, the startup access-review probe says so loudly, and refuses outright under <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">--strict</code>.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="apply">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Apply it</h2>
+          <p style="margin: 0 0 16px;">Edit the namespaces in the manifest first: it ships with <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">prod</code> as the example.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">kubectl create namespace janus-mcp
+kubectl apply -f rbac/janus-mcp-rbac.yaml</pre>
+          <p style="margin: 0;">The file contains, in order: the ServiceAccount, the namespace-read ClusterRole and its ClusterRoleBinding, then the per-namespace read Role and RoleBinding, then the optional write Role and RoleBinding.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="write">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">The optional write role</h2>
+          <p style="margin: 0 0 16px;">Only apply this if write tools are enabled in the janus-mcp config. It grants <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">patch</code> and nothing else, on the workload kinds a rollout restart or a scale actually touches.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">rules:
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+      - statefulsets
+      - statefulsets/scale
+      - daemonsets
+    verbs: ["patch"]</pre>
+          <p style="margin: 0;">Even with this bound, every write still needs an out-of-band human approval, and the config gates which tools register at all. RBAC is the floor, not the policy.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="verify">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Verify before you trust it</h2>
+          <p style="margin: 0 0 16px;">Check the negative cases, not just the positive ones. The Secret probe must come back <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">no</code>.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">SA=system:serviceaccount:janus-mcp:janus-mcp
+kubectl auth can-i list pods            -n prod --as $SA   # yes
+kubectl auth can-i get  secrets         -n prod --as $SA   # no
+kubectl auth can-i create pods/exec     -n prod --as $SA   # no
+kubectl auth can-i patch deployments    -n prod --as $SA   # yes only with the write role
+kubectl auth can-i list pods            -n kube-system --as $SA   # no</pre>
+          <p style="margin: 0;">The <a href="/threat-model">threat model</a> lists the invariants these checks stand in for.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="bind">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Bind a kubeconfig context</h2>
+          <p style="margin: 0 0 16px;">Create a context that uses the ServiceAccount token, then pin its name in the config. A short-lived token is fine; janus-mcp reads the kubeconfig at startup.</p>
+          <pre style="margin: 0; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;"># in ~/.config/janus-mcp/config.yaml
+context: limited-sa@prod-cluster
+scope:
+  allowed_namespaces: ["prod"]
+  denied_namespaces: ["kube-system", "kube-node-lease"]
+  allow_cluster_scoped: false</pre>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <footer style="background: var(--color-accent); color: #fff;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: clamp(36px, 5vw, 52px) clamp(20px, 5vw, 72px) clamp(28px, 4vw, 40px);">
+      <div style="display: flex; flex-wrap: nowrap; gap: 8px; overflow: auto;">
+        <a class="btn" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="background: #fff; color: #ae1800; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Clone the repo</a>
+        <a class="btn" href="/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start</a>
+        <a class="btn" href="/operator-runbook" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Operator runbook</a>
+        <a class="btn" href="/threat-model" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Threat model</a>
+        <a class="btn" href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">About MCP</a>
+      </div>
+      <div style="height: 2px; background: rgba(255,255,255,0.35); margin: clamp(28px, 4vw, 40px) 0 22px;"></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: baseline; font-size: 14px;">
+        <a href="/" style="font-family: var(--font-heading); font-weight: 800; margin-right: auto; color: #fff; text-decoration: none;">JANUS·MCP</a>
+        <span style="color: rgba(255,255,255,0.75);">MIT licensed, in active development</span>
+      </div>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    let saved = null;
+    try { saved = localStorage.getItem('janus-site-theme'); } catch (e) {}
+    if (saved === 'dark' || saved === 'light' || saved === 'system') this.setState({ mode: saved });
+    if (window.matchMedia) {
+      this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+      this.onMq = () => { if ((this.state.mode || 'system') === 'system') this.forceUpdate(); };
+      this.mq.addEventListener('change', this.onMq);
+    }
+    this.syncRoot();
+  }
+
+  componentDidUpdate() { this.syncRoot(); }
+  componentWillUnmount() { if (this.mq) this.mq.removeEventListener('change', this.onMq); }
+
+  syncRoot() { try { document.documentElement.setAttribute('data-theme', this.theme); } catch (e) {} }
+
+  get mode() { return (this.state && this.state.mode) || 'system'; }
+
+  get theme() {
+    if (this.mode !== 'system') return this.mode;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  themeStyle(mode) {
+    const on = this.mode === mode;
+    return 'appearance:none;border:0;cursor:pointer;font-family:var(--font-body);font-weight:600;'
+      + 'font-size:12px;letter-spacing:0.04em;padding:6px 11px;white-space:nowrap;'
+      + (mode === 'dark' ? '' : 'border-right:1px solid var(--color-divider);')
+      + (on ? 'background:var(--color-accent);color:#fff;' : 'background:transparent;color:color-mix(in srgb, var(--color-text) 65%, transparent);');
+  }
+
+  pickTheme(mode) {
+    return () => {
+      this.setState({ mode: mode });
+      try { localStorage.setItem('janus-site-theme', mode); } catch (e) {}
+    };
+  }
+
+  renderVals() {
+    return {
+      theme: this.theme,
+      themeSystem: this.themeStyle('system'), themeLight: this.themeStyle('light'), themeDark: this.themeStyle('dark'),
+      pickSystem: this.pickTheme('system'), pickLight: this.pickTheme('light'), pickDark: this.pickTheme('dark')
+    };
+  }
+}
+</script>
+</body>
+</html>

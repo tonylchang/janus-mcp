@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Operator runbook — Janus MCP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="/css/styles.css">
+<script src="/js/_ds_bundle.js"></script>
+<style>
+  html { scroll-behavior: smooth; }
+  body { margin: 0; text-wrap: pretty; background: var(--color-bg); }
+  a { color: var(--color-accent-700); text-underline-offset: 3px; }
+  a:hover { color: var(--color-accent); }
+  [data-theme="dark"] .btn-primary { color: #fff; }
+  :root[data-theme="dark"], [data-theme="dark"] {
+    --color-accent-100: #3a1a12;
+    --color-accent-800: #ffc4b8;
+    --color-neutral-100: #2a2726;
+    --color-neutral-200: #3a3736;
+    --color-neutral-800: #e6e3e2;
+    --color-bg: #1a1918;
+    --color-surface: #262322;
+    --color-text: #f1efee;
+    --color-divider: color-mix(in srgb, #f1efee 42%, transparent);
+    --color-accent-700: #ff9783;
+  }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 17px; line-height: 1.65; min-height: 100vh;">
+
+  <nav class="nav" style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); padding-inline: clamp(20px, 5vw, 72px); gap: 24px;">
+    <a class="nav-brand" href="/" style="letter-spacing: -0.01em; text-decoration: none; color: inherit;">JANUS<span style="color: var(--color-accent);">·</span>MCP</a>
+    <a href="/quick-start">Quick start</a>
+    <a href="/operator-runbook" aria-current="page">Runbook</a>
+    <a href="/threat-model">Threat model</a>
+    <a href="/least-privilege-rbac">RBAC</a>
+    <div style="display: flex; border: 1px solid var(--color-divider);">
+      <button onClick="{{ pickSystem }}" style="{{ themeSystem }}">System</button>
+      <button onClick="{{ pickLight }}" style="{{ themeLight }}">Light</button>
+      <button onClick="{{ pickDark }}" style="{{ themeDark }}">Dark</button>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="justify-content: flex-start;">GitHub</a>
+  </nav>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 72px);">
+    <header style="padding: clamp(44px, 6vw, 76px) 0 clamp(28px, 4vw, 40px);">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 20px;">Documentation</div>
+      <h1 style="font-size: clamp(38px, 5vw, 64px); line-height: 1.06; letter-spacing: -0.022em; margin: 0 0 0 -0.05em;">Operator runbook</h1>
+      <p style="max-width: 62ch; margin: 24px 0 0; font-size: 19px; line-height: 1.6;">Install, least-privilege credentials, the write-approval workflow, the audit log, and what to do when something refuses to start.</p>
+    </header>
+    <hr class="hr" style="margin: 0;">
+
+    <div style="display: flex; flex-wrap: wrap; gap: 0 clamp(32px, 5vw, 72px); padding-bottom: 20px;">
+      <aside style="flex: 0 0 190px; padding: 28px 0 0;">
+        <div style="position: sticky; top: 96px; display: flex; flex-direction: column; gap: 10px; font-size: 14px;">
+          <span style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">On this page</span>
+          <a href="#install" style="text-decoration: none;">Install</a>
+          <a href="#creds" style="text-decoration: none;">Least-privilege credentials</a>
+          <a href="#configure" style="text-decoration: none;">Configure</a>
+          <a href="#register" style="text-decoration: none;">Register a client</a>
+          <a href="#approvals" style="text-decoration: none;">Approving writes</a>
+          <a href="#audit" style="text-decoration: none;">Audit</a>
+          <a href="#trouble" style="text-decoration: none;">Troubleshooting</a>
+          <a href="#dev" style="text-decoration: none;">Development</a>
+        </div>
+      </aside>
+
+      <main style="flex: 1 1 460px; max-width: 72ch; padding: 28px 0 clamp(40px, 6vw, 64px); min-width: 0;">
+        <section id="install">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Install</h2>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">uv tool install janus-mcp-server        # or: pipx install janus-mcp-server
+
+# from a checkout:
+uv sync</pre>
+          <p style="margin: 0;">Full client recipes live in the <a href="/quick-start">quick start</a>.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="creds">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Set up least-privilege credentials</h2>
+          <p style="margin: 0 0 16px;">Strongly recommended. Run the server against a dedicated ServiceAccount, never cluster-admin.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">kubectl create namespace janus-mcp
+kubectl apply -f rbac/janus-mcp-rbac.yaml          # edit namespaces first
+# then create a kubeconfig context bound to the janus-mcp ServiceAccount token,
+# e.g. named limited-sa@prod-cluster</pre>
+          <p style="margin: 0;">What the manifests grant, and what they deliberately omit, is broken down in <a href="/least-privilege-rbac">least-privilege RBAC</a>.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="configure">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Configure</h2>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">mkdir -p ~/.config/janus-mcp
+cp examples/config.yaml ~/.config/janus-mcp/config.yaml
+$EDITOR ~/.config/janus-mcp/config.yaml   # context, namespaces, write_tools</pre>
+          <p style="margin: 0;">The server refuses to start if the pinned <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">context</code> is missing from the kubeconfig, if required read permissions are absent, or, with <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">--strict</code>, if the credentials are over-privileged enough to read Secrets.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="register">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Register with an MCP client</h2>
+          <p style="margin: 0 0 16px;">Example: Claude Desktop, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">~/Library/Application Support/Claude/claude_desktop_config.json</code>.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">{
+  "mcpServers": {
+    "kubernetes": {
+      "command": "uvx",
+      "args": ["janus-mcp", "serve", "--config", "/Users/me/.config/janus-mcp/config.yaml"]
+    }
+  }
+}</pre>
+          <p style="margin: 0;">VS Code, Codex CLI and Cursor recipes are in the <a href="/quick-start">quick start</a>.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="approvals">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Approving writes</h2>
+          <p style="margin: 0 0 16px;">With an elicitation-capable client, approval cards render natively. Read the live state line before clicking Approve.</p>
+          <p style="margin: 0 0 16px;">With other clients the write returns <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">status=pending approval_id=&lt;id&gt;</code>:</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">janus-mcp approvals            # list pending requests
+janus-mcp approve &lt;id&gt;         # approve one</pre>
+          <p style="margin: 0 0 16px;">Then tell the assistant to re-issue the call with the same arguments. Approvals expire (<code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">write_tools.oob_approval_ttl_seconds</code>, default 10 minutes) and are burned on first use.</p>
+          <p style="margin: 0;">Scale approvals are additionally bound to the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">resourceVersion</code> observed when the request was created. If the object changed while the approval waited, whether an HPA scaled it or a colleague did, the write aborts with a conflict instead of applying to state you never saw. Re-request and re-approve.</p>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="audit">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Audit</h2>
+          <p style="margin: 0 0 16px;">Every call is one JSONL record in <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">~/.local/state/janus-mcp/audit.jsonl</code>, rotated at 10 MiB: timestamp, tool, identifier args, scope and approval decisions, redaction counts. Bodies are never logged.</p>
+          <pre style="margin: 0; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">jq 'select(.event=="write_approved")' ~/.local/state/janus-mcp/audit.jsonl</pre>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="trouble">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Troubleshooting</h2>
+          <div style="overflow: auto; margin-bottom: 16px;">
+            <table class="table">
+              <thead><tr><th style="width: 40%;">Symptom</th><th>Cause and fix</th></tr></thead>
+              <tbody>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">cannot load kubeconfig context</code> at start</td><td>The pinned <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">context</code> does not exist. Check <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">kubectl config get-contexts</code>.</td></tr>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">missing permissions: list pods in …</code></td><td>Apply or extend the RBAC manifests for that namespace.</td></tr>
+                <tr><td>Over-privilege warning at start</td><td>You pointed it at an admin kubeconfig. Create the dedicated ServiceAccount.</td></tr>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">rate limit exceeded</code> tool errors</td><td>Expected back-pressure. Raise <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">limits.rate_per_minute</code> deliberately if needed.</td></tr>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">truncated=true</code> in results</td><td>Narrow with <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">label_selector</code>, <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">tail_lines</code> or <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">since_minutes</code>. Raise <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">result_max_bytes</code> only with the token budget in mind.</td></tr>
+                <tr><td>Writes missing from the client's tool list</td><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">read_only: true</code>, or the tool is not listed in <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">write_tools.enabled</code>.</td></tr>
+                <tr><td>Works in the terminal, fails from a GUI client</td><td>GUI hosts spawn the server with a minimal <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">PATH</code>, so the kubeconfig's <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">exec:</code> auth plugin is not found. Use the plugin's absolute path in <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">users[].user.exec.command</code>.</td></tr>
+                <tr><td><code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">[REDACTED:high-entropy]</code> over-firing on legitimate ids</td><td>Raise <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">redaction.entropy_threshold</code> slightly, for example to 4.8. Never disable the pass.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <hr class="hr" style="margin: 32px 0;">
+
+        <section id="dev">
+          <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">Development</h2>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">uv sync
+uv run pytest                          # unit + security suites (no cluster needed)
+uv run pytest tests/security           # probing + frame-capture leak tests
+UPDATE_GOLDENS=1 uv run pytest tests/unit/test_goldens.py   # regen, then REVIEW the diff
+uv run ruff check . && uv run ruff format --check . && uv run mypy</pre>
+          <p style="margin: 0 0 16px;">Integration tests against a real cluster:</p>
+          <pre style="margin: 0; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">kind create cluster --name janus-test
+JANUS_KIND_TEST=1 uv run pytest tests/integration -m integration</pre>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <footer style="background: var(--color-accent); color: #fff;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: clamp(36px, 5vw, 52px) clamp(20px, 5vw, 72px) clamp(28px, 4vw, 40px);">
+      <div style="display: flex; flex-wrap: nowrap; gap: 8px; overflow: auto;">
+        <a class="btn" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="background: #fff; color: #ae1800; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Clone the repo</a>
+        <a class="btn" href="/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start</a>
+        <a class="btn" href="/threat-model" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Threat model</a>
+        <a class="btn" href="/least-privilege-rbac" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Least-privilege RBAC</a>
+        <a class="btn" href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">About MCP</a>
+      </div>
+      <div style="height: 2px; background: rgba(255,255,255,0.35); margin: clamp(28px, 4vw, 40px) 0 22px;"></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: baseline; font-size: 14px;">
+        <a href="/" style="font-family: var(--font-heading); font-weight: 800; margin-right: auto; color: #fff; text-decoration: none;">JANUS·MCP</a>
+        <span style="color: rgba(255,255,255,0.75);">MIT licensed, in active development</span>
+      </div>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  componentDidMount() {
+    let saved = null;
+    try { saved = localStorage.getItem('janus-site-theme'); } catch (e) {}
+    if (saved === 'dark' || saved === 'light' || saved === 'system') this.setState({ mode: saved });
+    if (window.matchMedia) {
+      this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+      this.onMq = () => { if ((this.state.mode || 'system') === 'system') this.forceUpdate(); };
+      this.mq.addEventListener('change', this.onMq);
+    }
+    this.syncRoot();
+  }
+
+  componentDidUpdate() { this.syncRoot(); }
+  componentWillUnmount() { if (this.mq) this.mq.removeEventListener('change', this.onMq); }
+
+  syncRoot() { try { document.documentElement.setAttribute('data-theme', this.theme); } catch (e) {} }
+
+  get mode() { return (this.state && this.state.mode) || 'system'; }
+
+  get theme() {
+    if (this.mode !== 'system') return this.mode;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  themeStyle(mode) {
+    const on = this.mode === mode;
+    return 'appearance:none;border:0;cursor:pointer;font-family:var(--font-body);font-weight:600;'
+      + 'font-size:12px;letter-spacing:0.04em;padding:6px 11px;white-space:nowrap;'
+      + (mode === 'dark' ? '' : 'border-right:1px solid var(--color-divider);')
+      + (on ? 'background:var(--color-accent);color:#fff;' : 'background:transparent;color:color-mix(in srgb, var(--color-text) 65%, transparent);');
+  }
+
+  pickTheme(mode) {
+    return () => {
+      this.setState({ mode: mode });
+      try { localStorage.setItem('janus-site-theme', mode); } catch (e) {}
+    };
+  }
+
+  renderVals() {
+    return {
+      theme: this.theme,
+      themeSystem: this.themeStyle('system'), themeLight: this.themeStyle('light'), themeDark: this.themeStyle('dark'),
+      pickSystem: this.pickTheme('system'), pickLight: this.pickTheme('light'), pickDark: this.pickTheme('dark')
+    };
+  }
+}
+</script>
+</body>
+</html>

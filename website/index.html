@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Janus MCP</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="/support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="/css/styles.css">
+<script src="/js/_ds_bundle.js"></script>
+<style>
+  html { scroll-behavior: smooth; }
+  [data-theme="dark"] .btn-primary { color: #fff; }
+  :root[data-theme="dark"], [data-theme="dark"] {
+    --color-accent-100: #3a1a12;
+    --color-accent-800: #ffc4b8;
+    --color-neutral-100: #2a2726;
+    --color-neutral-800: #e6e3e2;
+    --color-bg: #1a1918;
+    --color-surface: #262322;
+    --color-text: #f1efee;
+    --color-divider: color-mix(in srgb, #f1efee 42%, transparent);
+    --color-neutral-200: #3a3736;
+    --color-accent-700: #ff9783;
+  }
+  body { margin: 0; text-wrap: pretty; background: var(--color-bg); }
+  a { color: var(--color-accent-700); text-underline-offset: 3px; }
+  a:hover { color: var(--color-accent); }
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 17px; line-height: 1.65; min-height: 100vh;">
+
+  <nav class="nav" style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); padding-inline: clamp(20px, 5vw, 72px); gap: 28px;">
+    <span class="nav-brand" style="letter-spacing: -0.01em;">JANUS<span style="color: var(--color-accent);">·</span>MCP</span>
+    <a href="#how">How it works</a>
+    <a href="#tools">Tools</a>
+    <a href="#start">Quick start</a>
+    <a href="/quick-start">Docs</a>
+    <div style="display: flex; border: 1px solid var(--color-divider);">
+      <button onClick="{{ pickSystem }}" style="{{ themeSystem }}">System</button>
+      <button onClick="{{ pickLight }}" style="{{ themeLight }}">Light</button>
+      <button onClick="{{ pickDark }}" style="{{ themeDark }}">Dark</button>
+    </div>
+    <a class="btn btn-primary" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="justify-content: flex-start;">GitHub</a>
+  </nav>
+
+  <header style="max-width: 1180px; margin: 0 auto; padding: clamp(56px, 9vw, 120px) clamp(20px, 5vw, 72px) clamp(40px, 6vw, 76px);">
+    <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 28px;">Kubernetes · Model Context Protocol · Local-first</div>
+    <h1 style="font-size: clamp(44px, 6.6vw, 92px); line-height: 1.06; letter-spacing: -0.022em; margin: 0 0 0 -0.058em; max-width: 15ch;">
+      <span style="display: block;">Two faces.</span>
+      <span style="display: block;">One cluster.</span>
+      <span style="display: block; color: var(--color-accent);">No exposed keys.</span>
+    </h1>
+    <p style="max-width: 58ch; margin: 36px 0 0; font-size: 19px; line-height: 1.6;">An MCP server that gives AI assistants a safe, controlled window into your Kubernetes clusters. It runs locally, holds your <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">KUBECONFIG</code> close to its chest, and lets the model operate through carefully scoped tools: no token, certificate, or API server URL ever leaves your machine.</p>
+    <div style="display: flex; flex-wrap: wrap; gap: 12px; margin-top: 36px;">
+      <a class="btn btn-primary" href="#start" style="padding: 12px 20px; font-size: 15px;">Quick start</a>
+      <a class="btn btn-secondary" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="padding: 12px 20px; font-size: 15px;">View the source</a>
+    </div>
+    <div style="margin-top: 32px; max-width: 620px; background: #201e1d; color: #f3f2f2;">
+      <div style="display: flex; align-items: center; gap: 16px; padding: 14px 18px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px;">
+        <span style="color: var(--color-accent-400);">$</span>
+        <span style="flex: 1; display: flex; align-items: baseline; gap: 0; overflow: auto; white-space: nowrap;">
+          <span style="color: var(--color-accent-400);">{</span>
+          <button onClick="{{ pickUv }}" style="{{ pmUv }}">uv tool</button>
+          <span style="color: rgba(243,242,242,0.55);">,&nbsp;</span>
+          <button onClick="{{ pickPipx }}" style="{{ pmPipx }}">pipx</button>
+          <span style="color: rgba(243,242,242,0.55);">,&nbsp;</span>
+          <button onClick="{{ pickPip }}" style="{{ pmPip }}">pip</button>
+          <span style="color: var(--color-accent-400);">}</span>
+          <span>&nbsp;install janus-mcp-server</span>
+        </span>
+        <button onClick="{{ copyInstall }}" style="border: 1px solid rgba(243,242,242,0.4); background: transparent; color: #f3f2f2; font: inherit; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; padding: 5px 10px; cursor: pointer;" style-hover="border-color: var(--color-accent-400); color: var(--color-accent-400);">{{ copyLabel }}</button>
+      </div>
+    </div>
+  </header>
+
+  <div style="max-width: 1180px; margin: 0 auto; padding: 0 clamp(20px, 5vw, 72px);">
+    <hr class="hr" style="margin: 0;">
+    <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 24px clamp(20px, 3vw, 40px); padding: 44px 0;">
+      <div>
+        <div style="font-family: var(--font-heading); font-weight: 800; font-size: clamp(30px, 2.6vw, 40px); line-height: 1.1; color: var(--color-accent); margin-left: -0.045em;">0</div>
+        <div style="font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.45; color: color-mix(in srgb, var(--color-text) 70%, transparent); margin-top: 8px;">Secrets in the kind registry</div>
+      </div>
+      <div>
+        <div style="font-family: var(--font-heading); font-weight: 800; font-size: clamp(30px, 2.6vw, 40px); line-height: 1.1; color: var(--color-accent); margin-left: -0.045em;">3</div>
+        <div style="font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.45; color: color-mix(in srgb, var(--color-text) 70%, transparent); margin-top: 8px;">Redaction layers per response</div>
+      </div>
+      <div>
+        <div style="font-family: var(--font-heading); font-weight: 800; font-size: clamp(30px, 2.6vw, 40px); line-height: 1.1; color: var(--color-accent); margin-left: -0.045em;">5</div>
+        <div style="font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.45; color: color-mix(in srgb, var(--color-text) 70%, transparent); margin-top: 8px;">Security invariants, CI-verified</div>
+      </div>
+      <div>
+        <div style="font-family: var(--font-heading); font-weight: 800; font-size: clamp(30px, 2.6vw, 40px); line-height: 1.1; color: var(--color-accent); margin-left: -0.045em;">1</div>
+        <div style="font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; line-height: 1.45; color: color-mix(in srgb, var(--color-text) 70%, transparent); margin-top: 8px;">Pinned kubeconfig context</div>
+      </div>
+    </section>
+    <hr class="hr" style="margin: 0;">
+
+    <section id="how" style="padding: clamp(48px, 7vw, 88px) 0;">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 24px;">How it works</div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 2px; background: var(--color-divider); border: 2px solid var(--color-divider);">
+        <button onClick="{{ pickStage1 }}" style="{{ stage1 }}">
+          <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7;">01 / Client</div>
+          <h3 style="font-size: 22px; margin: 12px 0 10px; letter-spacing: -0.015em;">LLM client</h3>
+          <p style="margin: 0; font-size: 15px; line-height: 1.6;">Claude Code, Claude Desktop, VS Code, Codex, Cursor, or your own agent loop. Speaks MCP over stdio.</p>
+        </button>
+        <button onClick="{{ pickStage2 }}" style="{{ stage2 }}">
+          <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7;">02 / Gateway</div>
+          <h3 style="font-size: 22px; margin: 12px 0 10px; letter-spacing: -0.015em;">Janus, running locally</h3>
+          <p style="margin: 0; font-size: 15px; line-height: 1.6;">Holds the KUBECONFIG in-process, pinned to one context. Validates, scopes, rate-limits, redacts, audits.</p>
+        </button>
+        <button onClick="{{ pickStage3 }}" style="{{ stage3 }}">
+          <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.7;">03 / Cluster</div>
+          <h3 style="font-size: 22px; margin: 12px 0 10px; letter-spacing: -0.015em;">Kubernetes API server</h3>
+          <p style="margin: 0; font-size: 15px; line-height: 1.6;">One module touches the client library. Every exception is mapped to a typed, generic message, so no API URLs leak.</p>
+        </button>
+      </div>
+
+      <div style="border: 2px solid var(--color-divider); border-top: 0;">
+        <div style="{{ pane1 }}">
+          <div>
+            <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700);">What the model sees</div>
+            <p style="margin: 12px 0 0; font-size: 16px; line-height: 1.6;">Declarative tool definitions and sanitized results, never raw cluster state, never a text dump.</p>
+          </div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7; display: flex; flex-direction: column; gap: 10px;">
+            <li>Tools carry <code style="font-family: ui-monospace, Menlo, monospace;">ToolAnnotations</code>: <code style="font-family: ui-monospace, Menlo, monospace;">readOnlyHint</code>, <code style="font-family: ui-monospace, Menlo, monospace;">openWorldHint: false</code>, so the client knows what is safe to call unattended.</li>
+            <li>Clients that support MCP resources can pin <code style="font-family: ui-monospace, Menlo, monospace;">cluster://summary</code> into context: a cached health overview for free, no tool call spent.</li>
+            <li>Where elicitation is supported, write approvals arrive as native cards showing live state; elsewhere the tool returns <code style="font-family: ui-monospace, Menlo, monospace;">status=pending</code> with an approval id.</li>
+          </ul>
+        </div>
+        <div style="{{ pane2 }}">
+          <div>
+            <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700);">Where the policy lives</div>
+            <p style="margin: 12px 0 0; font-size: 16px; line-height: 1.6;">Operator-authoritative config, checked at startup and again at call time.</p>
+          </div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7; display: flex; flex-direction: column; gap: 10px;">
+            <li>The kubeconfig context is pinned by exact match. The server refuses to start on any other one, and warns if those credentials can read Secrets.</li>
+            <li>ScopeGuard (deny wins), token-bucket rate limits per tool, and an ApprovalGate that binds a SHA-256 of the exact arguments to the approval id and burns it on use.</li>
+            <li>Strict config parsing rejects unknown keys, so a typo in a security-relevant setting fails at startup rather than silently opening a door.</li>
+            <li>Every call lands in an append-only audit log at <code style="font-family: ui-monospace, Menlo, monospace;">~/.local/state/janus-mcp/audit.jsonl</code>.</li>
+          </ul>
+        </div>
+        <div style="{{ pane3 }}">
+          <div>
+            <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700);">The absence is the control</div>
+            <p style="margin: 12px 0 0; font-size: 16px; line-height: 1.6;">Secrets are not filtered out of the kind registry. They were never in it.</p>
+          </div>
+          <ul style="margin: 0; padding-left: 20px; font-size: 15px; line-height: 1.7; display: flex; flex-direction: column; gap: 10px;">
+            <li>A single module imports the Kubernetes client library; raw client errors embed the API server URL, so each one is mapped to a typed, generic message before it can travel.</li>
+            <li>The shipped RBAC manifests grant least privilege, and list no Secret verbs anywhere.</li>
+            <li>EKS, GKE and AKS need nothing janus-specific: auth is whatever your kubeconfig says, including <code style="font-family: ui-monospace, Menlo, monospace;">exec:</code> credential plugins.</li>
+            <li>Node provider IDs, external IPs, cloud labels and IAM role annotations are masked by the redaction engine by default.</li>
+          </ul>
+        </div>
+      </div>
+      <sc-if value="{{ showPipeline }}" hint-placeholder-val="{{ true }}">
+      <div style="margin-top: 32px; border: 2px solid var(--color-divider); padding: 22px 24px;">
+        <div style="font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent); margin-bottom: 16px;">Every tool call runs the same pipeline</div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px;">
+          <span style="border: 1px solid var(--color-divider); padding: 5px 10px;">validate</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="border: 1px solid var(--color-divider); padding: 5px 10px;">ScopeGuard</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="border: 1px solid var(--color-divider); padding: 5px 10px;">RateLimiter</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="border: 1px solid var(--color-divider); padding: 5px 10px;">kube call</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="background: var(--color-accent); color: #fff; padding: 5px 10px;">structural redaction</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="background: var(--color-accent); color: #fff; padding: 5px 10px;">pattern + entropy scrub</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="background: var(--color-accent); color: #fff; padding: 5px 10px;">envelope byte-cap</span>
+          <span style="color: var(--color-accent);">→</span>
+          <span style="border: 1px solid var(--color-divider); padding: 5px 10px;">audit</span>
+        </div>
+        <p style="margin: 16px 0 0; font-size: 14px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Rendering failures fail closed: the model gets a generic error, never a partially-redacted payload.</p>
+      </div>
+      </sc-if>
+    </section>
+    <hr class="hr" style="margin: 0;">
+
+    <section id="tools" style="padding: clamp(48px, 7vw, 88px) 0;">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 24px;">The surface</div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px clamp(24px, 4vw, 64px); align-items: end; margin-bottom: 28px;">
+        <h2 style="font-size: clamp(26px, 3vw, 36px); line-height: 1.12; margin: 0; letter-spacing: -0.02em;">Tools, not text dumps.</h2>
+        <p style="margin: 0; font-size: 16px; max-width: 52ch; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Read-only diagnostics come free. Write tools only register when an operator lists them in the config, and a global read-only switch removes them from the listing entirely.</p>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 28px;">
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">get_pods</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">get_events</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">get_logs</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">list_namespaces</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">describe_resource</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-divider);">get_cluster_summary</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; border: 1px solid var(--color-accent); color: var(--color-accent-700);">cluster://summary</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; background: var(--color-accent); color: #fff;">rollout_restart</span>
+          <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; padding: 5px 10px; background: var(--color-accent); color: #fff;">scale_deployment</span>
+      </div>
+      <table class="table">
+        <thead>
+          <tr><th style="width: 34%;">Tool</th><th>What it returns</th><th style="width: 96px;">Mode</th></tr>
+        </thead>
+        <tbody>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">get_pods</td><td>Pod inventory and status for an allowed namespace</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">get_events</td><td>Recent warning and normal events, sanitized</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">get_logs</td><td>Bounded log tail, scrubbed for secrets and high-entropy strings</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">list_namespaces</td><td>Namespaces the operator has put in scope</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">describe_resource</td><td>One resource by kind and name, without env-var values or credential annotations</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">get_cluster_summary</td><td>One-screen health overview, cached</td><td><span class="tag tag-neutral">read</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">cluster://summary</td><td>The same overview as a pinnable MCP resource</td><td><span class="tag tag-outline">resource</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">rollout_restart</td><td>Restarts a deployment after human approval</td><td><span class="tag tag-accent">write</span></td></tr>
+            <tr><td style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap;">scale_deployment</td><td>Scales within max_replicas after human approval</td><td><span class="tag tag-accent">write</span></td></tr>
+        </tbody>
+      </table>
+      <p style="margin: 20px 0 0; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Every tool declares its annotations up front, output is bounded by a byte cap, and each call is rate-limited per tool. Parameter reference lives in the <a href="/operator-runbook">operator runbook</a>.</p>
+    </section>
+    <hr class="hr" style="margin: 0;">
+
+    <section id="start" style="padding: clamp(48px, 7vw, 88px) 0;">
+      <div style="font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--color-accent-700); margin-bottom: 24px;">Quick start</div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: clamp(24px, 4vw, 56px);">
+        <div>
+          <div style="display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-divider); margin-bottom: 14px;">
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">01</span>
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;">Install</span>
+          </div>
+          <p style="margin: 0 0 14px; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Three ways from PyPI, all giving you the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">janus-mcp</code> CLI. Contributors can clone and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">uv sync</code> instead.</p>
+          <div style="border: 2px solid var(--color-divider); display: flex; flex-direction: column;">
+            <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px;">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">uv</span>
+              <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">uv tool install janus-mcp-server</code>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--color-divider);">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">pipx</span>
+              <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">pipx install janus-mcp-server</code>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--color-divider);">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">pip</span>
+              <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">pip install janus-mcp-server</code>
+            </div>
+          </div>
+          <p style="margin: 14px 0 0; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">No install at all: <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">uvx janus-mcp-server serve</code> runs it one-shot.</p>
+
+          <div style="height: 40px;"></div><div style="display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-divider); margin-bottom: 14px;">
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">02</span>
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;">Configure</span>
+          </div>
+          <p style="margin: 0 0 14px; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Two settings are required: the pinned context and the namespaces it may touch. The server refuses to start on any other context.</p>
+          <pre style="margin: 0; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">context: limited-sa@prod-cluster
+scope:
+  allowed_namespaces: ["prod", "staging"]
+  denied_namespaces: ["kube-system"]
+  allow_cluster_scoped: false
+read_only: false
+write_tools:
+  enabled: ["rollout_restart", "scale_deployment"]
+  max_replicas: 20</pre>
+        </div>
+        <div>
+          <div style="display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-divider); margin-bottom: 14px;">
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">03</span>
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;">Register with your client</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; border: 1px solid var(--color-divider); margin-bottom: 18px;">
+            <button onClick="{{ pickA }}" style="{{ tabA }}">Claude Code</button>
+            <button onClick="{{ pickB }}" style="{{ tabB }}">Claude Desktop</button>
+            <button onClick="{{ pickC }}" style="{{ tabC }}">VS Code</button>
+            <button onClick="{{ pickD }}" style="{{ tabD }}">Codex CLI</button>
+            <button onClick="{{ pickE }}" style="{{ tabE }}">Cursor</button>
+          </div>
+          <div style="font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent); margin-bottom: 10px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">{{ snippetPath }}</div>
+          <pre style="margin: 0; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; min-height: 200px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">{{ snippetCode }}</pre>
+          <p style="margin: 16px 0 0; font-size: 15px; line-height: 1.6; color: color-mix(in srgb, var(--color-text) 70%, transparent);">{{ snippetNote }}</p>
+
+          <div style="height: 40px;"></div><div style="display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-divider); margin-bottom: 14px;">
+            <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">04</span>
+            <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;">Ask it something</span>
+          </div>
+          <div style="border-left: 2px solid var(--color-accent); padding: 2px 0 2px 18px; display: flex; flex-direction: column; gap: 10px; font-size: 15px; line-height: 1.5;">
+            <span>Why are pods crashing in the <em>prod</em> namespace?</span>
+            <span>Summarize the health of my cluster.</span>
+            <span>Show me recent warning events for <em>payments-api</em>.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer style="background: var(--color-accent); color: #fff;">
+    <div style="max-width: 1180px; margin: 0 auto; padding: clamp(40px, 5vw, 56px) clamp(20px, 5vw, 72px) clamp(32px, 4vw, 44px);">
+      <div style="display: flex; flex-wrap: nowrap; gap: 8px; overflow: auto;">
+        <a class="btn" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="background: #fff; color: #ae1800; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Clone the repo</a>
+        <a class="btn" href="/threat-model" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Threat model</a>
+        <a class="btn" href="/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start guide</a>
+        <a class="btn" href="/operator-runbook" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Operator runbook</a>
+        <a class="btn" href="/least-privilege-rbac" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Least-privilege RBAC</a>
+        <a class="btn" href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">About MCP</a>
+      </div>
+      <div style="height: 2px; background: rgba(255,255,255,0.35); margin: clamp(32px, 4vw, 44px) 0 24px;"></div>
+      <div style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: baseline; font-size: 14px;">
+        <span style="font-family: var(--font-heading); font-weight: 800; margin-right: auto;">JANUS·MCP</span>
+        <span style="color: rgba(255,255,255,0.75);">MIT licensed, in active development</span>
+      </div>
+    </div>
+  </footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultClient&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;Claude Code&quot;,&quot;Claude Desktop&quot;,&quot;VS Code&quot;,&quot;Codex CLI&quot;,&quot;Cursor&quot;],&quot;default&quot;:&quot;Claude Code&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Quick start&quot;},&quot;showPipeline&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;How it works&quot;}}">
+const CLIENTS = [
+  {
+    id: 'a', path: 'terminal',
+    code: 'claude mcp add kubernetes -- uvx janus-mcp-server serve\n\n# or for all your projects:\nclaude mcp add --scope user kubernetes \\\n  -- uvx janus-mcp-server serve',
+    note: 'Start a new session and check /mcp. Claude Code does not render elicitation yet, so write approvals go through janus-mcp approve &lt;id&gt;.'
+  },
+  {
+    id: 'b', path: '~/Library/Application Support/Claude/claude_desktop_config.json',
+    code: '{\n  "mcpServers": {\n    "kubernetes": {\n      "command": "uvx",\n      "args": ["janus-mcp-server", "serve"]\n    }\n  }\n}',
+    note: 'Fully quit and reopen the app. Claude Desktop renders elicitation, so write approvals appear as native cards.'
+  },
+  {
+    id: 'c', path: '.vscode/mcp.json',
+    code: '{\n  "servers": {\n    "kubernetes": {\n      "type": "stdio",\n      "command": "uvx",\n      "args": ["janus-mcp-server", "serve"]\n    }\n  }\n}',
+    note: 'Or add it through MCP: Add Server in the command palette. Copilot agent mode picks it up on reload.'
+  },
+  {
+    id: 'd', path: '~/.codex/config.toml',
+    code: '[mcp_servers.kubernetes]\ncommand = "uvx"\nargs = ["janus-mcp-server", "serve"]',
+    note: 'From a source checkout, swap uvx janus-mcp-server for uv run janus-mcp in the same position.'
+  },
+  {
+    id: 'e', path: '~/.cursor/mcp.json  ·  .cursor/mcp.json',
+    code: '{\n  "mcpServers": {\n    "kubernetes": {\n      "command": "uvx",\n      "args": ["janus-mcp-server", "serve"]\n    }\n  }\n}',
+    note: 'Global config or per-project; the per-project file wins where both exist.'
+  }
+];
+
+class Component extends DCLogic {
+  state = { client: null, copied: false };
+
+  get clientId() {
+    if (this.state.client) return this.state.client;
+    const byName = { 'Claude Code': 'a', 'Claude Desktop': 'b', 'VS Code': 'c', 'Codex CLI': 'd', 'Cursor': 'e' };
+    return byName[this.props.defaultClient] || 'a';
+  }
+
+  tabStyle(id) {
+    const on = this.clientId === id;
+    return 'appearance:none;border:0;cursor:pointer;font-family:var(--font-body);font-weight:600;'
+      + 'font-size:13px;letter-spacing:0.01em;padding:8px 13px;'
+      + 'border-right:1px solid var(--color-divider);'
+      + (on ? 'background:var(--color-accent);color:#fff;' : 'background:transparent;color:var(--color-text);');
+  }
+
+  pick(id) { return () => this.setState({ client: id }); }
+
+  pmStyle(id) {
+    const on = (this.state.pm || 'uv') === id;
+    return 'appearance:none;border:0;cursor:pointer;font:inherit;padding:0 2px;'
+      + (on ? 'background:var(--color-accent);color:#fff;'
+            : 'background:transparent;color:rgba(243,242,242,0.55);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:3px;');
+  }
+
+  pickPm(id) { return () => this.setState({ pm: id, copied: false }); }
+
+  stageStyle(n) {
+    const on = (this.state.stage || 2) === n;
+    return 'appearance:none;cursor:pointer;text-align:left;font:inherit;color:var(--color-text);'
+      + 'border:0;background:var(--color-bg);padding:28px 24px 32px;'
+      + (on ? 'box-shadow:inset 0 -6px 0 var(--color-accent);' : 'box-shadow:inset 0 -6px 0 transparent;opacity:0.72;');
+  }
+
+  paneStyle(n) {
+    const on = (this.state.stage || 2) === n;
+    return on
+      ? 'display:grid;grid-template-columns:minmax(0,300px) minmax(0,1fr);gap:24px clamp(24px,4vw,64px);padding:28px 24px 32px;'
+      : 'display:none;';
+  }
+
+  pickStage(n) { return () => this.setState({ stage: n }); }
+
+  componentDidMount() {
+    let saved = null;
+    try { saved = localStorage.getItem('janus-site-theme'); } catch (e) {}
+    if (saved === 'dark' || saved === 'light' || saved === 'system') this.setState({ mode: saved });
+    if (window.matchMedia) {
+      this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+      this.onMq = () => { if ((this.state.mode || 'system') === 'system') this.forceUpdate(); };
+      this.mq.addEventListener('change', this.onMq);
+    }
+    this.syncRoot();
+  }
+
+  componentWillUnmount() { if (this.mq) this.mq.removeEventListener('change', this.onMq); }
+
+  get mode() { return this.state.mode || 'system'; }
+
+  get theme() {
+    if (this.mode !== 'system') return this.mode;
+    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  }
+
+  componentDidUpdate() { this.syncRoot(); }
+
+  syncRoot() {
+    try { document.documentElement.setAttribute('data-theme', this.theme); } catch (e) {}
+  }
+
+  themeStyle(mode) {
+    const on = this.mode === mode;
+    return 'appearance:none;border:0;cursor:pointer;font-family:var(--font-body);font-weight:600;'
+      + 'font-size:12px;letter-spacing:0.04em;padding:6px 11px;white-space:nowrap;'
+      + (mode === 'dark' ? '' : 'border-right:1px solid var(--color-divider);')
+      + (on ? 'background:var(--color-accent);color:#fff;' : 'background:transparent;color:color-mix(in srgb, var(--color-text) 65%, transparent);');
+  }
+
+  pickTheme(mode) {
+    return () => {
+      this.setState({ mode: mode });
+      try { localStorage.setItem('janus-site-theme', mode); } catch (e) {}
+    };
+  }
+
+  installCmd() {
+    return { uv: 'uv tool install janus-mcp-server', pipx: 'pipx install janus-mcp-server', pip: 'pip install janus-mcp-server' }[this.state.pm || 'uv'];
+  }
+
+  copyInstall = () => {
+    const text = this.installCmd();
+    const done = () => { this.setState({ copied: true }); setTimeout(() => this.setState({ copied: false }), 1600); };
+    if (navigator.clipboard) navigator.clipboard.writeText(text).then(done, done); else done();
+  };
+
+  renderVals() {
+    const active = CLIENTS.find(c => c.id === this.clientId) || CLIENTS[0];
+    return {
+      showPipeline: this.props.showPipeline ?? true,
+      theme: this.theme,
+      themeSystem: this.themeStyle('system'), themeLight: this.themeStyle('light'), themeDark: this.themeStyle('dark'),
+      pickSystem: this.pickTheme('system'), pickLight: this.pickTheme('light'), pickDark: this.pickTheme('dark'),
+      installCmd: this.installCmd(),
+      stage1: this.stageStyle(1), stage2: this.stageStyle(2), stage3: this.stageStyle(3),
+      pane1: this.paneStyle(1), pane2: this.paneStyle(2), pane3: this.paneStyle(3),
+      pickStage1: this.pickStage(1), pickStage2: this.pickStage(2), pickStage3: this.pickStage(3),
+      pmUv: this.pmStyle('uv'), pmPipx: this.pmStyle('pipx'), pmPip: this.pmStyle('pip'),
+      pickUv: this.pickPm('uv'), pickPipx: this.pickPm('pipx'), pickPip: this.pickPm('pip'),
+      tabA: this.tabStyle('a'), tabB: this.tabStyle('b'), tabC: this.tabStyle('c'),
+      tabD: this.tabStyle('d'), tabE: this.tabStyle('e'),
+      pickA: this.pick('a'), pickB: this.pick('b'), pickC: this.pick('c'),
+      pickD: this.pick('d'), pickE: this.pick('e'),
+      snippetPath: active.path,
+      snippetCode: active.code,
+      snippetNote: active.note,
+      copyInstall: this.copyInstall,
+      copyLabel: this.state.copied ? 'Copied' : 'Copy'
+    };
+  }
+}
+</script>
+</body>
+</html>
