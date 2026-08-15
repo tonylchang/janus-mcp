@@ -35,7 +35,7 @@ def _configure_logging() -> None:
 def _store(settings: Settings) -> ApprovalStore:
     return ApprovalStore(
         settings.approvals_dir,
-        ttl_seconds=settings.write_tools.approval_timeout_seconds * 2.5,
+        ttl_seconds=settings.write_tools.oob_approval_ttl_seconds,
     )
 
 

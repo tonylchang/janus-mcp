@@ -103,7 +103,7 @@ class FakeKube:
             name="payments-api",
             namespace="prod",
             replicas=2,
-            ready_replicas=2,
+            status_replicas=2,
             resource_version="12345",
         )
 
@@ -235,7 +235,7 @@ class FakeKube:
             name=name,
             namespace=namespace,
             replicas=replicas,
-            ready_replicas=self.scale_state.ready_replicas,
+            status_replicas=self.scale_state.status_replicas,
             resource_version=str(int(expected_resource_version) + 1),
         )
         return self.scale_state

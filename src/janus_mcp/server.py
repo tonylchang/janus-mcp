@@ -42,6 +42,7 @@ from .redaction import (
 )
 from .validation import (
     validate_bounds,
+    validate_field_selector,
     validate_grep,
     validate_name,
     validate_reason,
@@ -89,7 +90,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
     }
     limiter = RateLimiter(rates, settings.limits.rate_per_minute.default)
     store = ApprovalStore(
-        settings.approvals_dir, ttl_seconds=settings.write_tools.approval_timeout_seconds * 2.5
+        settings.approvals_dir, ttl_seconds=settings.write_tools.oob_approval_ttl_seconds
     )
     gate = ApprovalGate(settings.write_tools, settings.read_only, store)
     limits = settings.limits
@@ -113,6 +114,29 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         except Exception as exc:
             log.error("kube_call_failed", error_type=type(exc).__name__)
             raise ToolError("Kubernetes request failed; see server log") from None
+
+    # Policy denials are audited: reconnaissance (out-of-scope probes, rate-limit
+    # hammering) must leave a trace, not just a refusal the model sees.
+    def _check_namespace(tool: str, namespace: str) -> None:
+        try:
+            scope.check_namespace(namespace)
+        except ToolError as exc:
+            audit.log_refused(tool, "scope", namespace=namespace, detail=str(exc))
+            raise
+
+    def _check_cluster_scoped(tool: str) -> None:
+        try:
+            scope.check_cluster_scoped()
+        except ToolError as exc:
+            audit.log_refused(tool, "scope", detail=str(exc))
+            raise
+
+    def _acquire(tool: str) -> None:
+        try:
+            limiter.acquire(tool)
+        except ToolError:
+            audit.log_refused(tool, "rate_limit")
+            raise
 
     def _shape(tool: str, render: Any, stats: RedactionStats, **fields: Any) -> str:
         """Render + scrub + envelope, failing closed on any redaction error."""
@@ -138,7 +162,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         """List the namespaces this assistant is allowed to see, with status and age.
         Results are limited to an operator-configured scope."""
         validate_selector(label_selector, "label_selector")
-        limiter.acquire("list_namespaces")
+        _acquire("list_namespaces")
         stats = RedactionStats()
         in_scope = set(scope.namespaces())
         try:
@@ -182,10 +206,16 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         reason for the most recent failure, if any."""
         validate_name(namespace, "namespace")
         validate_selector(label_selector, "label_selector")
-        validate_selector(field_selector, "field_selector")
+        # Field selectors filter server-side, so a selector on a masked field
+        # (spec.nodeName) would be a membership oracle for the masked value —
+        # only allow fields whose values the model may see anyway.
+        pod_fields = {"metadata.name", "status.phase"}
+        if not redaction.mask_node_names:
+            pod_fields.add("spec.nodeName")
+        validate_field_selector(field_selector, pod_fields)
         validate_bounds(limit, 1, 200, "limit")
-        scope.check_namespace(namespace)
-        limiter.acquire("get_pods")
+        _check_namespace("get_pods", namespace)
+        _acquire("get_pods")
         stats = RedactionStats()
         pods = await _fetch(kube.list_pods(namespace, label_selector, field_selector, limit))
         sanitized = [sanitize_object("Pod", p, redaction, stats) for p in pods]
@@ -216,8 +246,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(involved_object, "involved_object")
         validate_bounds(since_minutes, 1, 1440, "since_minutes")
         validate_bounds(limit, 1, 200, "limit")
-        scope.check_namespace(namespace)
-        limiter.acquire("get_events")
+        _check_namespace("get_events", namespace)
+        _acquire("get_events")
         stats = RedactionStats()
 
         selectors = []
@@ -273,10 +303,10 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             if namespace is None:
                 raise ToolError(f"namespace is required for namespaced kind '{kind}'")
             validate_name(namespace, "namespace")
-            scope.check_namespace(namespace)
+            _check_namespace("describe_resource", namespace)
         else:
-            scope.check_cluster_scoped()
-        limiter.acquire("describe_resource")
+            _check_cluster_scoped("describe_resource")
+        _acquire("describe_resource")
         stats = RedactionStats()
 
         obj = await _fetch(kube.get_object(kind, name, namespace if namespaced else None))
@@ -337,8 +367,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         if since_minutes is not None:
             validate_bounds(since_minutes, 1, 1440, "since_minutes")
         grep = validate_grep(grep)
-        scope.check_namespace(namespace)
-        limiter.acquire("get_logs")
+        _check_namespace("get_logs", namespace)
+        _acquire("get_logs")
         stats = RedactionStats()
 
         raw = await _fetch(
@@ -381,9 +411,12 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
     async def _summary_text(via: str) -> str:
         """Shared by the get_cluster_summary tool and the cluster://summary
         resource; both serve the same cached, redacted text."""
-        limiter.acquire("get_cluster_summary")
+        _acquire("get_cluster_summary")
         cached = summary_cache.get("summary")
         if cached is not None:
+            # Cache hits are still reads the model performed — audit them too,
+            # or cached traffic becomes invisible to the operator.
+            audit.log_call("get_cluster_summary", via=via, cached=True)
             return cached
         stats = RedactionStats()
         lines: list[str] = []
@@ -491,25 +524,43 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         args: dict[str, Any],
         action: str,
         live_state: str,
-    ) -> tuple[bool, str | None]:
-        decision = await gate.request_approval(ctx, tool, args, action, live_state)
+        state: dict[str, Any] | None = None,
+    ) -> tuple[bool, str | None, dict[str, Any] | None]:
+        """Returns (approved, message-if-not-approved, approved-state).
+
+        ``approved-state`` is the live-state snapshot bound to an out-of-band
+        approval at creation time (None for elicitation approvals, where the
+        fresh read happened immediately before the human saw the card).
+        Messages go through _shape like every other model-visible string.
+        """
+        decision = await gate.request_approval(ctx, tool, args, action, live_state, state)
         if decision.approved:
             audit.log_approved(tool, via=decision.via, **args)
-            return True, None
+            return True, None, decision.state
         if decision.pending_id is not None:
             audit.log_pending(tool, approval_id=decision.pending_id, **args)
-            return False, envelope(
-                tool,
-                f"status=pending approval_id={decision.pending_id}\n"
-                f"Requested change: {action}\n"
-                "No change was made. A human operator must approve this request with:\n"
-                f"  janus-mcp approve {decision.pending_id}\n"
-                "Then call this tool again with exactly the same arguments.",
-                limits,
+            return (
+                False,
+                _shape(
+                    tool,
+                    f"status=pending approval_id={decision.pending_id}\n"
+                    f"Requested change: {action}\n"
+                    "No change was made. A human operator must approve this request with:\n"
+                    f"  janus-mcp approve {decision.pending_id}\n"
+                    "Then call this tool again with exactly the same arguments.",
+                    RedactionStats(),
+                ),
+                None,
             )
         audit.log_denied(tool, via=decision.via, detail=decision.detail, **args)
-        return False, envelope(
-            tool, f"Denied by operator ({decision.detail}). No change was made.", limits
+        return (
+            False,
+            _shape(
+                tool,
+                f"Denied by operator ({decision.detail}). No change was made.",
+                RedactionStats(),
+            ),
+            None,
         )
 
     def register_rollout_restart() -> None:
@@ -527,9 +578,9 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(name, "name")
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
-            scope.check_namespace(namespace)
+            _check_namespace("rollout_restart", namespace)
             gate.check_enabled("rollout_restart")
-            limiter.acquire("rollout_restart")
+            _acquire("rollout_restart")
             stats = RedactionStats()
 
             live = await _fetch(kube.get_object(kind, name, namespace))
@@ -545,13 +596,14 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             )
             args = {"kind": kind, "name": name, "namespace": namespace, "reason": reason}
             action = f"Rolling restart: {kind} {namespace}/{name} (reason: {reason})"
-            approved, message = await _resolve_approval(
+            approved, message, _ = await _resolve_approval(
                 ctx, "rollout_restart", args, action, live_state
             )
             if not approved:
                 return message or "request not approved"
 
             result = await _fetch(kube.rollout_restart(kind, name, namespace, reason))
+            audit.log_executed("rollout_restart", **args)
             summary_cache.clear()
             new_status = result.get("status") or {}
             body = (
@@ -575,24 +627,38 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             explicit operator approval; bounded by an operator-configured maximum."""
             validate_name(name, "name")
             validate_name(namespace, "namespace")
-            scope.check_namespace(namespace)
+            _check_namespace("scale_deployment", namespace)
             gate.check_enabled("scale_deployment")
             gate.check_replica_bounds(replicas)  # refused before approval is requested
-            limiter.acquire("scale_deployment")
+            _acquire("scale_deployment")
             stats = RedactionStats()
 
             current = await _fetch(kube.get_scale(kind, name, namespace))  # fresh read
+            # The Scale subresource has no readiness; read the object itself so
+            # the human approver sees real health, not a fabricated "N/N ready".
+            live = await _fetch(kube.get_object(kind, name, namespace))
+            ready = (live.get("status") or {}).get("readyReplicas") or 0
             args = {"kind": kind, "name": name, "namespace": namespace, "replicas": replicas}
             action = f"Scale {kind} {namespace}/{name}: {current.replicas} → {replicas} replicas"
-            approved, message = await _resolve_approval(
-                ctx, "scale_deployment", args, action, current.summary()
+            live_state = f"{ready}/{current.replicas} ready ({current.status_replicas} total)"
+            approved, message, approved_state = await _resolve_approval(
+                ctx,
+                "scale_deployment",
+                args,
+                action,
+                live_state,
+                state={"resource_version": current.resource_version},
             )
             if not approved:
                 return message or "request not approved"
 
-            result = await _fetch(
-                kube.scale(kind, name, namespace, replicas, current.resource_version)
-            )
+            # Out-of-band approvals bind the resourceVersion observed when the
+            # request was created — the state the human's approval referred to.
+            # If the object changed in between, the patch 409s instead of
+            # silently applying to a workload the approver never saw.
+            expected_rv = (approved_state or {}).get("resource_version") or current.resource_version
+            result = await _fetch(kube.scale(kind, name, namespace, replicas, expected_rv))
+            audit.log_executed("scale_deployment", **args)
             summary_cache.clear()
             body = (
                 f"scaled {kind} {namespace}/{name} from {current.replicas} to "

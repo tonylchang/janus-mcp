@@ -47,6 +47,10 @@ class WriteToolsSettings(StrictModel):
     max_replicas: int = Field(default=20, ge=1)
     allow_scale_to_zero: bool = False
     approval_timeout_seconds: float = Field(default=120.0, gt=0)
+    # Lifetime of a pending out-of-band approval (`janus-mcp approve <id>`).
+    # Independent of approval_timeout_seconds, which governs only the
+    # elicitation prompt — tuning one must not silently shrink the other.
+    oob_approval_ttl_seconds: float = Field(default=600.0, gt=0)
 
 
 class RedactionSettings(StrictModel):

@@ -3,11 +3,14 @@ the out-of-band fallback, bait-and-switch resistance, and stale-state conflicts.
 
 from __future__ import annotations
 
+import json
+
 import anyio
 import pytest
 from mcp import types
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
+from janus_mcp.kube import ScaleInfo
 from janus_mcp.policy import ApprovalStore
 from janus_mcp.server import build_server
 from support import FakeKube, make_audit, make_settings
@@ -161,7 +164,7 @@ async def test_stale_resource_version_conflicts_safely(tmp_path) -> None:
             name=info.name,
             namespace=info.namespace,
             replicas=info.replicas,
-            ready_replicas=info.ready_replicas,
+            status_replicas=info.status_replicas,
             resource_version=str(int(info.resource_version) + 7),
         )
         return info
@@ -171,6 +174,88 @@ async def test_stale_resource_version_conflicts_safely(tmp_path) -> None:
         result = await client.call_tool("scale_deployment", SCALE_ARGS)
     assert result.isError
     assert "conflict" in result.content[0].text
+
+
+async def test_oob_approval_binds_observed_state(tmp_path) -> None:
+    """An out-of-band approval refers to the live state shown when the request
+    was created. If the object changes before the approved retry executes, the
+    patch must 409 instead of silently applying to a workload the human never
+    saw (e.g. an HPA scaling 2→50 while the approval sat in the queue)."""
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    store = ApprovalStore(settings.approvals_dir, ttl_seconds=300)
+
+    async with connect(server) as client:
+        first = await client.call_tool("scale_deployment", SCALE_ARGS)
+        approval_id = first.content[0].text.split("approval_id=")[1].split()[0]
+
+        # concurrent writer changes the deployment while approval is pending
+        kube.scale_state = ScaleInfo(
+            kind="Deployment",
+            name="payments-api",
+            namespace="prod",
+            replicas=50,
+            status_replicas=50,
+            resource_version="99999",
+        )
+        store.approve(approval_id)
+
+        result = await client.call_tool("scale_deployment", SCALE_ARGS)
+        assert result.isError
+        assert "conflict" in result.content[0].text
+        # the mutation did not happen
+        assert kube.scale_state.replicas == 50
+
+
+async def test_elicitation_error_is_denied_not_raised(tmp_path) -> None:
+    """A broken elicitation exchange is a denial: no raw error reaches the
+    model, no mutation happens, and no exception escapes the gate."""
+    settings = make_settings(tmp_path)
+
+    async def explodes(context, params):
+        raise RuntimeError("client UI crashed")
+
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=explodes) as client:
+        result = await client.call_tool("scale_deployment", SCALE_ARGS)
+    assert "Denied by operator" in result.content[0].text
+    assert "RuntimeError" not in result.content[0].text
+    assert kube.calls_for("scale") == []
+
+
+async def test_approval_card_shows_true_readiness(tmp_path) -> None:
+    """The Scale subresource has no readiness; the card must reflect the real
+    workload health (fixture: 0/2 ready), never a fabricated 'N/N ready'."""
+    settings = make_settings(tmp_path)
+    captured: dict[str, str] = {}
+
+    async def capture(context, params):
+        captured["message"] = params.message
+        return types.ElicitResult(action="accept", content={"confirm": True})
+
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=capture) as client:
+        await client.call_tool("scale_deployment", SCALE_ARGS)
+    assert "0/2 ready" in captured["message"]
+    assert "2/2 ready" not in captured["message"]
+
+
+async def test_write_lifecycle_is_audited(tmp_path) -> None:
+    """Approved-but-failed must be distinguishable from executed: a
+    write_executed record appears only after the mutation succeeded."""
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=_responder("accept", True)) as client:
+        await client.call_tool("scale_deployment", SCALE_ARGS)
+    events = [json.loads(line) for line in settings.audit_log.read_text().splitlines()]
+    kinds = [e["event"] for e in events]
+    assert "write_approved" in kinds
+    assert "write_executed" in kinds
+    assert kinds.index("write_executed") > kinds.index("write_approved")
 
 
 async def test_rollout_restart_approved_path(tmp_path) -> None:

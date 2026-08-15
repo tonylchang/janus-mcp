@@ -4,6 +4,8 @@ Kubernetes API access where that is the contract."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from mcp.shared.memory import create_connected_server_and_client_session as connect
 
@@ -75,6 +77,73 @@ async def test_huge_replicas_refused_before_approval(server, fake_kube) -> None:
     # bounds check fires before the fresh read and before any approval flow
     assert fake_kube.calls_for("get_scale") == []
     assert fake_kube.calls_for("scale") == []
+
+
+async def test_node_name_oracle_via_field_selector_refused(server, fake_kube) -> None:
+    """spec.nodeName is masked in output; a field selector on it would let the
+    model confirm masked node names by enumeration (match/no-match oracle)."""
+    result = await _call(
+        server,
+        "get_pods",
+        {"namespace": "prod", "field_selector": "spec.nodeName=ip-10-0-1-23.ec2.internal"},
+    )
+    assert result.isError
+    assert "not filterable" in result.content[0].text
+    assert fake_kube.calls == []  # refused before ANY API access
+
+
+async def test_allowed_field_selector_passes_through(server, fake_kube) -> None:
+    result = await _call(
+        server, "get_pods", {"namespace": "prod", "field_selector": "status.phase=Running"}
+    )
+    assert not result.isError
+    assert fake_kube.calls_for("list_pods")[0]["field_selector"] == "status.phase=Running"
+
+
+def _audit_events(settings) -> list[dict]:
+    return [json.loads(line) for line in settings.audit_log.read_text().splitlines()]
+
+
+async def test_scope_denial_is_audited(server, fake_kube, settings) -> None:
+    await _call(server, "get_pods", {"namespace": "kube-system"})
+    events = _audit_events(settings)
+    assert any(
+        e["event"] == "refused"
+        and e["tool"] == "get_pods"
+        and e["reason"] == "scope"
+        and e["namespace"] == "kube-system"
+        for e in events
+    )
+
+
+async def test_rate_limit_denial_is_audited(tmp_path) -> None:
+    settings = make_settings(tmp_path, limits={"rate_per_minute": {"default": 60, "get_logs": 1}})
+    server = build_server(settings, FakeKube(), make_audit(settings))
+    args = {"namespace": "prod", "pod": "payments-api-7f9c6d4b-xkq2p", "previous": True}
+    async with connect(server) as client:
+        first = await client.call_tool("get_logs", args)
+        assert not first.isError
+        second = await client.call_tool("get_logs", args)
+        assert second.isError
+    events = _audit_events(settings)
+    assert any(
+        e["event"] == "refused" and e["tool"] == "get_logs" and e["reason"] == "rate_limit"
+        for e in events
+    )
+
+
+async def test_cached_summary_reads_are_audited(server, settings) -> None:
+    """Cache hits are still reads the model performed — each must be recorded."""
+    async with connect(server) as client:
+        await client.call_tool("get_cluster_summary", {})
+        await client.call_tool("get_cluster_summary", {})
+    events = [
+        e
+        for e in _audit_events(settings)
+        if e["event"] == "tool_call" and e["tool"] == "get_cluster_summary"
+    ]
+    assert len(events) == 2
+    assert events[1].get("cached") is True
 
 
 async def test_grep_runs_post_redaction(server, fake_kube) -> None:

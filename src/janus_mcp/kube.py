@@ -69,12 +69,16 @@ class ScaleInfo:
     name: str
     namespace: str
     replicas: int
-    ready_replicas: int
+    # The Scale subresource's status.replicas is the observed TOTAL replica
+    # count — it says nothing about readiness (V1ScaleStatus has no
+    # readyReplicas). Never present this as "ready" to a human approver.
+    status_replicas: int
     resource_version: str
 
     def summary(self) -> str:
         return (
-            f"{self.kind} {self.namespace}/{self.name}: {self.ready_replicas}/{self.replicas} ready"
+            f"{self.kind} {self.namespace}/{self.name}: "
+            f"{self.replicas} desired, {self.status_replicas} observed"
         )
 
 
@@ -300,7 +304,7 @@ class KubeClient:
             name=name,
             namespace=namespace,
             replicas=scale.spec.replicas or 0,
-            ready_replicas=scale.status.replicas or 0,
+            status_replicas=scale.status.replicas or 0,
             resource_version=scale.metadata.resource_version,
         )
 
@@ -321,7 +325,7 @@ class KubeClient:
             name=name,
             namespace=namespace,
             replicas=scale.spec.replicas or 0,
-            ready_replicas=scale.status.replicas or 0,
+            status_replicas=scale.status.replicas or 0,
             resource_version=scale.metadata.resource_version,
         )
 
