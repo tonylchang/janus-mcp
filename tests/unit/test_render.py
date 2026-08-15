@@ -40,6 +40,23 @@ def test_envelope_truncates_on_line_boundary() -> None:
         assert line.startswith("line ")
 
 
+def test_truncation_preserves_untrusted_end_fence() -> None:
+    """Large log output is exactly where the injection-defense framing matters;
+    truncation must never leave the untrusted block unterminated."""
+    from janus_mcp.redaction import wrap_untrusted
+    from janus_mcp.redaction.render import TRUNCATION_HINT, UNTRUSTED_BEGIN, UNTRUSTED_END
+
+    limits = LimitsSettings(result_max_bytes=2048)
+    body = wrap_untrusted("\n".join(f"line {i} " + "x" * 80 for i in range(200)))
+    out = envelope("get_logs", body, limits)
+    assert "truncated=true" in out.split("\n")[0]
+    assert UNTRUSTED_BEGIN in out
+    assert out.endswith(UNTRUSTED_END)
+    assert TRUNCATION_HINT in out
+    # the byte cap still holds with the re-appended fence
+    assert len(out.split("\n", 1)[1].encode()) <= 2048
+
+
 def test_pod_table_matches_walkthrough_shape() -> None:
     pods = [
         support.load_fixture("pod.json"),

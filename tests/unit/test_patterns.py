@@ -69,6 +69,49 @@ def test_high_entropy_token_redacted() -> None:
     assert "[REDACTED:high-entropy]" in out
 
 
+# ---- entropy pass: shapes the absolute threshold could never catch ----------
+
+
+def test_hex_secret_caught_by_entropy() -> None:
+    # A 64-char hex HMAC tops out at 4 bits/char — mathematically below the
+    # 4.5 default, so it needs the charset-scaled threshold to be caught.
+    secret = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    out = scrub(f"loaded signing key {secret} from disk")
+    assert secret not in out
+    assert "[REDACTED:high-entropy]" in out
+
+
+def test_short_random_token_caught_by_entropy() -> None:
+    # 20 distinct mixed-case chars: entropy log2(20)=4.32, unreachable under a
+    # flat 4.5 threshold — needs the length-scaled cap.
+    token = "Zx9Qw2Ke7Rt4Yu1Vb3Nm"
+    out = scrub(f"issued nonce {token} to client")
+    assert token not in out
+    assert "[REDACTED:high-entropy]" in out
+
+
+def test_unrecognized_key_random_value_masks_value_only() -> None:
+    out = scrub("blob=Zx9Qw2Ke7Rt4Yu1Vb3NmPl uploaded")
+    assert out.startswith("blob=")
+    assert "Zx9Qw2Ke7Rt4Yu1Vb3NmPl" not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # DNS-1123-shaped: every generated Kubernetes name looks high-entropy
+        "replicaset payments-api-7f9c6d4b has 3 replicas",
+        "node ip-10-1-2-3.us-west-2.compute.internal cordoned",
+        # key=<short-id>: the label must not be judged as part of the blob
+        "approval_id=1a2b3c4d granted by operator",
+        # pure numbers are ids/timestamps, never judged as secrets
+        "span 16999999999999999999 finished",
+    ],
+)
+def test_entropy_negative_cases_survive(text: str) -> None:
+    assert scrub(text) == text
+
+
 def test_public_ip_masked_by_default() -> None:
     out = scrub("upstream at 203.0.113.99 unreachable")
     assert "203.0.113.99" not in out
@@ -84,6 +127,44 @@ def test_ip_masking_can_be_disabled() -> None:
     rs = RedactionSettings(mask_external_ips=False)
     text = "upstream at 203.0.113.99 unreachable"
     assert scrub(text, rs) == text
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "2607:f8b0:4004:c07::6a",  # compressed
+        "2001:db8:85a3:8d3:1319:8a2e:370:7348",  # full 8-group
+        "2001:db8::",  # trailing ::
+        "::ffff:203.0.113.9",  # IPv4-mapped, masked as one unit
+    ],
+)
+def test_public_ipv6_masked(address: str) -> None:
+    out = scrub(f"connected to {address} port 443")
+    assert address not in out
+    assert "[REDACTED:ip]" in out
+
+
+def test_internal_ipv6_kept() -> None:
+    text = "listening on ::1 and fe80::1 and fd12:3456::1"
+    assert scrub(text) == text
+
+
+def test_ipv6_masked_inside_url_brackets() -> None:
+    out = scrub("dial https://[2607:f8b0::1]:8443/healthz failed")
+    assert "2607:f8b0::1" not in out
+    assert "[[REDACTED:ip]]:8443" in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "event at 12:30:45 acknowledged",  # clock time
+        "mac 3d:f2:c9:a6:b3:4f detected",  # MAC address (6 hex groups, no ::)
+        "restarting in 00:05 (backoff)",
+    ],
+)
+def test_ipv6_lookalikes_survive(text: str) -> None:
+    assert scrub(text) == text
 
 
 # ---- negative cases: diagnostic identifiers must survive --------------------

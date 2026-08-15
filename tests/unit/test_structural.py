@@ -100,6 +100,73 @@ def test_workload_template_sanitized() -> None:
     assert "vault.hashicorp.com/agent-inject-secret-db" not in template_annotations
 
 
+def test_cronjob_jobtemplate_metadata_annotations_filtered() -> None:
+    """spec.jobTemplate has its OWN metadata level (annotations land on the
+    created Job) — identity/credential annotations there must not bypass the
+    filter that covers every other kind."""
+    obj = {
+        "kind": "CronJob",
+        "metadata": {"name": "billing-export", "namespace": "prod"},
+        "spec": {
+            "schedule": "0 3 * * *",
+            "jobTemplate": {
+                "metadata": {
+                    "annotations": {
+                        "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/billing",
+                        "vault.hashicorp.com/agent-inject-token": "true",
+                        "prometheus.io/scrape": "true",
+                    }
+                },
+                "spec": {
+                    "template": {
+                        "metadata": {"annotations": {"iam.gke.io/gcp-service-account": "x@y.iam"}},
+                        "spec": {
+                            "containers": [
+                                {"name": "export", "env": [{"name": "DB_PASSWORD", "value": "pw"}]}
+                            ]
+                        },
+                    }
+                },
+            },
+        },
+    }
+    out = sanitize_object("CronJob", obj, RS, RedactionStats())
+    blob = json.dumps(out)
+    assert "role-arn" not in blob
+    assert "arn:aws:iam" not in blob
+    assert "agent-inject-token" not in blob
+    assert "iam.gke.io" not in blob
+    job_annotations = out["spec"]["jobTemplate"]["metadata"]["annotations"]
+    assert job_annotations == {"prometheus.io/scrape": "true"}  # benign ones survive
+    env = out["spec"]["jobTemplate"]["spec"]["template"]["spec"]["containers"][0]["env"]
+    assert env[0]["value"] == "[REDACTED:env-value]"
+
+
+def test_namespace_labels_masked_unless_allowlisted() -> None:
+    obj = {
+        "kind": "Namespace",
+        "metadata": {
+            "name": "prod",
+            "labels": {
+                "kubernetes.io/metadata.name": "prod",
+                "billing-account": "acct-8842-sensitive",
+                "team": "payments",
+            },
+        },
+        "status": {"phase": "Active"},
+    }
+    out = sanitize_object("Namespace", obj, RS, RedactionStats())
+    labels = out["metadata"]["labels"]
+    assert labels["kubernetes.io/metadata.name"] == "prod"
+    assert labels["billing-account"] == "[MASKED]"
+    assert labels["team"] == "[MASKED]"
+
+    allowing = RedactionSettings(namespace_label_allowlist=["team"])
+    out2 = sanitize_object("Namespace", obj, allowing, RedactionStats())
+    assert out2["metadata"]["labels"]["team"] == "payments"
+    assert out2["metadata"]["labels"]["billing-account"] == "[MASKED]"
+
+
 def test_configmap_values_masked_keys_and_sizes_shown() -> None:
     out = sanitize("ConfigMap", "configmap.json")
     blob = json.dumps(out)

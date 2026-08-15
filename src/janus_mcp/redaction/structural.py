@@ -204,18 +204,21 @@ def _sanitize_pod(
     return obj
 
 
+def _filter_meta_annotations(meta: Any, settings: RedactionSettings, stats: RedactionStats) -> None:
+    if isinstance(meta, dict) and "annotations" in meta:
+        filtered = _filter_annotations(meta.get("annotations"), settings, stats)
+        if filtered:
+            meta["annotations"] = filtered
+        else:
+            meta.pop("annotations", None)
+
+
 def _sanitize_workload(
     obj: dict[str, Any], settings: RedactionSettings, stats: RedactionStats
 ) -> dict[str, Any]:
     template = (obj.get("spec") or {}).get("template")
     if isinstance(template, dict):
-        meta = template.get("metadata")
-        if isinstance(meta, dict) and "annotations" in meta:
-            filtered = _filter_annotations(meta.get("annotations"), settings, stats)
-            if filtered:
-                meta["annotations"] = filtered
-            else:
-                meta.pop("annotations", None)
+        _filter_meta_annotations(template.get("metadata"), settings, stats)
         if isinstance(template.get("spec"), dict):
             _sanitize_pod_spec(template["spec"], settings, stats)
     return obj
@@ -226,6 +229,11 @@ def _sanitize_cronjob(
 ) -> dict[str, Any]:
     job_template = (obj.get("spec") or {}).get("jobTemplate")
     if isinstance(job_template, dict):
+        # The jobTemplate carries its OWN metadata level (annotations land on
+        # the created Job), distinct from the pod template's metadata inside it.
+        # Both must be filtered — identity annotations (IAM role ARNs etc.)
+        # frequently sit at this level.
+        _filter_meta_annotations(job_template.get("metadata"), settings, stats)
         _sanitize_workload(job_template, settings, stats)
     return obj
 
@@ -303,6 +311,24 @@ def _sanitize_node(
     return obj
 
 
+def _sanitize_namespace(
+    obj: dict[str, Any], settings: RedactionSettings, stats: RedactionStats
+) -> dict[str, Any]:
+    """Namespace labels can carry tenant/billing/team identifiers; mask all but
+    the always-safe name label and the operator's explicit allowlist."""
+    meta = obj.get("metadata")
+    if isinstance(meta, dict) and isinstance(meta.get("labels"), dict):
+        labels: dict[str, Any] = {}
+        for key, value in meta["labels"].items():
+            if key == "kubernetes.io/metadata.name" or key in settings.namespace_label_allowlist:
+                labels[key] = value
+            else:
+                labels[key] = "[MASKED]"
+                stats.add("namespace-label", 1)
+        meta["labels"] = labels
+    return obj
+
+
 def _sanitize_default(
     obj: dict[str, Any], settings: RedactionSettings, stats: RedactionStats
 ) -> dict[str, Any]:
@@ -339,6 +365,8 @@ def sanitize_object(
         return _sanitize_service(obj, settings, stats)
     if kind == "Node":
         return _sanitize_node(obj, settings, stats)
-    if kind in ("PersistentVolumeClaim", "HorizontalPodAutoscaler", "Namespace"):
+    if kind == "Namespace":
+        return _sanitize_namespace(obj, settings, stats)
+    if kind in ("PersistentVolumeClaim", "HorizontalPodAutoscaler"):
         return obj
     return _sanitize_default(obj, settings, stats)

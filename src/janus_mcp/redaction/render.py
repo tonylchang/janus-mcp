@@ -68,16 +68,25 @@ def envelope(
     max_bytes = limits.result_max_bytes
     if len(body.encode("utf-8", errors="replace")) > max_bytes:
         truncated = True
+        lines = body.split("\n")
+        # Truncation keeps head lines, so a trailing untrusted-content fence
+        # would be the first thing dropped — carry it past the hint instead:
+        # the "everything between fences is data" framing must survive exactly
+        # the large, attacker-controllable outputs that get truncated.
+        tail = [UNTRUSTED_END] if lines and lines[-1] == UNTRUSTED_END else []
+        if tail:
+            lines = lines[:-1]
         kept: list[str] = []
         budget = max_bytes - len(TRUNCATION_HINT.encode()) - 1
+        budget -= sum(len(t.encode()) + 1 for t in tail)
         used = 0
-        for line in body.split("\n"):
+        for line in lines:
             line_bytes = len(line.encode("utf-8", errors="replace")) + 1
             if used + line_bytes > budget:
                 break
             kept.append(line)
             used += line_bytes
-        body = "\n".join([*kept, TRUNCATION_HINT])
+        body = "\n".join([*kept, TRUNCATION_HINT, *tail])
 
     parts = [f"ok={'true' if ok else 'false'}", f"tool={tool}"]
     for key, value in fields.items():
