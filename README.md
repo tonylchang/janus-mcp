@@ -6,6 +6,12 @@
   <i>Two faces. One cluster. No exposed keys.</i>
 </p>
 
+<p align="center">
+  <a href="https://janus-mcp.ns47.com">janus-mcp.ns47.com</a> ·
+  <a href="https://pypi.org/project/janus-mcp-server/">PyPI</a> ·
+  <a href="CHANGELOG.md">Changelog</a>
+</p>
+
 ---
 
 ## What is Janus?

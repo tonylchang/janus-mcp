@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "janus-mcp-server"
-version = "0.1.0"
+version = "0.2.0"
 description = "Secure Kubernetes MCP server: redacted diagnostics and human-approved writes, credentials never leave the process."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -35,9 +35,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/tonylchang/janus-mcp"
+Homepage = "https://janus-mcp.ns47.com"
+Repository = "https://github.com/tonylchang/janus-mcp"
 Issues = "https://github.com/tonylchang/janus-mcp/issues"
 Security = "https://github.com/tonylchang/janus-mcp/security/policy"
+Changelog = "https://github.com/tonylchang/janus-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 janus-mcp = "janus_mcp.cli:main"
