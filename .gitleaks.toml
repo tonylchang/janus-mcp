@@ -15,5 +15,6 @@ paths = [
     '''tests/fixtures/.*''',
     '''tests/support\.py''',
     '''tests/unit/goldens/.*''',
+    '''tests/unit/test_patterns\.py''',
     '''tests/integration/manifests/.*''',
 ]

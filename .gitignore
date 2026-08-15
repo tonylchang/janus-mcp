@@ -8,3 +8,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 .hypothesis/
+.coverage
+.DS_Store
+.env
+*.local.yaml

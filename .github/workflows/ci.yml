@@ -1,25 +1,33 @@
 name: ci
 
-# Triggers are deliberately conservative to preserve Actions minutes on the
-# private repo: PRs and manual dispatch only (plus the release workflow, which
-# runs the same gate on tags). Once the repo is public, Actions are free —
-# consider re-adding `push: branches: [main]` and a 3.13 matrix entry then.
-#
 # Actions are pinned by commit SHA (the tag comment is informational): the
 # actions themselves are part of the supply chain.
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+# Workflows only need to read the repo; nothing here writes.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   checks:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - run: uv sync
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -34,6 +42,18 @@ jobs:
         with:
           scan-args: |-
             --lockfile=uv.lock
+
+  # Full-history secret scan. The planted test canaries are allowlisted in
+  # .gitleaks.toml; anything else that looks like a credential fails the build.
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   kind-integration:
     runs-on: ubuntu-latest

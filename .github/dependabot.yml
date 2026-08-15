@@ -1,0 +1,12 @@
+# Weekly dependency PRs. Actions bumps update the pinned SHAs (the pins are a
+# supply-chain control — never replace them with floating tags).
+version: 2
+updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
