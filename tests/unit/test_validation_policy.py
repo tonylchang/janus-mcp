@@ -9,6 +9,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from janus_mcp.policy import ApprovalGate, ApprovalStore, RateLimiter, ScopeGuard
 from janus_mcp.validation import (
     validate_bounds,
+    validate_field_selector,
     validate_name,
     validate_reason,
     validate_selector,
@@ -18,15 +19,45 @@ from support import make_settings
 # ---- validation --------------------------------------------------------------
 
 
-@pytest.mark.parametrize("bad", ["../etc", "UPPER", "a" * 300, "", "a_b", "a b", "x/../y", "$(rm)"])
+@pytest.mark.parametrize(
+    "bad",
+    ["../etc", "UPPER", "a" * 300, "", "a_b", "a b", "x/../y", "$(rm)", ".a", "a.", "a..b", "A.b"],
+)
 def test_bad_names_rejected(bad: str) -> None:
     with pytest.raises(ToolError):
         validate_name(bad)
 
 
-@pytest.mark.parametrize("good", ["prod", "payments-api-7f9c6d4b-xkq2p", "a", "x1"])
+@pytest.mark.parametrize(
+    "good",
+    [
+        "prod",
+        "payments-api-7f9c6d4b-xkq2p",
+        "a",
+        "x1",
+        # dotted Node names are routine on managed clusters (EKS/GKE)
+        "ip-10-1-2-3.us-west-2.compute.internal",
+        "gke-cluster-default-pool-1a2b3c4d-x9yz.c.project.internal",
+    ],
+)
 def test_good_names_accepted(good: str) -> None:
     assert validate_name(good) == good
+
+
+def test_field_selector_allowlist_enforced() -> None:
+    allowed = {"metadata.name", "status.phase"}
+    assert validate_field_selector(None, allowed) is None
+    assert (
+        validate_field_selector("status.phase=Running,metadata.name!=x", allowed)
+        == "status.phase=Running,metadata.name!=x"
+    )
+    # a selector on a masked field is a membership oracle — refused
+    with pytest.raises(ToolError, match="not filterable"):
+        validate_field_selector("spec.nodeName=ip-10-0-1-23.ec2.internal", allowed)
+    with pytest.raises(ToolError, match="term"):
+        validate_field_selector("status.phase", allowed)  # bare field, no operator
+    with pytest.raises(ToolError):
+        validate_field_selector("x" * 600, allowed)
 
 
 def test_selector_charset_enforced() -> None:
@@ -98,6 +129,17 @@ def test_rate_limiter_exhausts_and_reports() -> None:
     limiter.acquire("get_pods")
 
 
+def test_per_tool_denial_does_not_drain_global_bucket() -> None:
+    """A client retry-looping one throttled tool must not starve every other
+    tool by draining the shared global bucket with denied attempts."""
+    limiter = RateLimiter({"get_logs": 1}, default=30)  # global bucket: 60
+    limiter.acquire("get_logs")
+    for _ in range(100):
+        with pytest.raises(ToolError):
+            limiter.acquire("get_logs")
+    limiter.acquire("get_pods")  # still works: denials consumed no global tokens
+
+
 # ---- approval gate policy checks --------------------------------------------
 
 
@@ -149,29 +191,33 @@ def test_scale_to_zero_opt_in(tmp_path) -> None:
 def test_store_binds_args_hash(tmp_path) -> None:
     _, store = _gate(tmp_path)
     args_a = {"name": "x", "replicas": 4}
-    approval_id = store.create("scale_deployment", args_a, "Scale x to 4")
+    approval_id = store.create(
+        "scale_deployment", args_a, "Scale x to 4", {"resource_version": "7"}
+    )
     store.approve(approval_id)
     # bait-and-switch: approval for A must not authorize B
-    state, _ = store.consume("scale_deployment", {"name": "x", "replicas": 0})
-    assert state == "none"
-    state, matched = store.consume("scale_deployment", args_a)
-    assert state == "approved"
+    status, _, _ = store.consume("scale_deployment", {"name": "x", "replicas": 0})
+    assert status == "none"
+    status, matched, state = store.consume("scale_deployment", args_a)
+    assert status == "approved"
     assert matched == approval_id
+    # the live-state snapshot bound at creation time comes back with the approval
+    assert state == {"resource_version": "7"}
     # burned on use
-    state, _ = store.consume("scale_deployment", args_a)
-    assert state == "none"
+    status, _, _ = store.consume("scale_deployment", args_a)
+    assert status == "none"
 
 
 def test_store_pending_then_approved(tmp_path) -> None:
     _, store = _gate(tmp_path)
     args = {"name": "y"}
     approval_id = store.create("rollout_restart", args, "restart y")
-    state, matched = store.consume("rollout_restart", args)
-    assert state == "pending"
+    status, matched, _ = store.consume("rollout_restart", args)
+    assert status == "pending"
     assert matched == approval_id
     assert store.approve(approval_id) is not None
-    state, _ = store.consume("rollout_restart", args)
-    assert state == "approved"
+    status, _, _ = store.consume("rollout_restart", args)
+    assert status == "approved"
 
 
 def test_store_expiry(tmp_path) -> None:

@@ -16,12 +16,15 @@ from pathlib import Path
 from typing import Any
 
 import anyio
+import structlog
 from mcp import types
 from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import BaseModel
 
 from .config import ScopeSettings, WriteToolsSettings
+
+log = structlog.get_logger("janus_mcp.policy")
 
 
 class ScopeGuard:
@@ -62,6 +65,9 @@ class _TokenBucket:
             return True
         return False
 
+    def refund(self) -> None:
+        self.tokens = min(self.capacity, self.tokens + 1.0)
+
 
 class RateLimiter:
     """Per-tool token buckets plus a global bucket; protects the API server and
@@ -76,7 +82,13 @@ class RateLimiter:
     def acquire(self, tool: str) -> None:
         if tool not in self._buckets:
             self._buckets[tool] = _TokenBucket(self._rates.get(tool, self._default))
-        if not self._global.try_acquire() or not self._buckets[tool].try_acquire():
+        # Per-tool bucket first: a call denied by its own tool's limit must not
+        # drain the shared global bucket (a retry-looping client on one tool
+        # would otherwise starve every other tool).
+        if not self._buckets[tool].try_acquire():
+            raise ToolError(f"rate limit exceeded for '{tool}'; wait a moment and narrow the query")
+        if not self._global.try_acquire():
+            self._buckets[tool].refund()
             raise ToolError(f"rate limit exceeded for '{tool}'; wait a moment and narrow the query")
 
 
@@ -91,6 +103,10 @@ class Decision:
     via: str
     pending_id: str | None = None
     detail: str = ""
+    # Live state observed when the approval request was created (out-of-band
+    # flow only). Callers bind writes to it (e.g. resourceVersion) so a change
+    # between what the human saw and the execution aborts instead of applying.
+    state: dict[str, Any] | None = None
 
 
 class ApprovalStore:
@@ -120,7 +136,9 @@ class ApprovalStore:
             return None
         return record
 
-    def create(self, tool: str, args: dict[str, Any], action: str) -> str:
+    def create(
+        self, tool: str, args: dict[str, Any], action: str, state: dict[str, Any] | None = None
+    ) -> str:
         self._dir.mkdir(parents=True, exist_ok=True)
         approval_id = secrets.token_hex(4)
         record = {
@@ -128,6 +146,7 @@ class ApprovalStore:
             "tool": tool,
             "args_hash": _args_hash(tool, args),
             "action": action,
+            "state": state or {},
             "created_at": time.time(),
             "expires_at": time.time() + self._ttl,
             "approved": False,
@@ -151,21 +170,25 @@ class ApprovalStore:
         records = [self._load(p) for p in sorted(self._dir.glob("*.json"))]
         return [r for r in records if r is not None]
 
-    def consume(self, tool: str, args: dict[str, Any]) -> tuple[str, str | None]:
+    def consume(self, tool: str, args: dict[str, Any]) -> tuple[str, str | None, dict[str, Any]]:
         """Look up the approval state for this exact (tool, args) pair.
 
-        Returns one of ("approved", id) — record found and burned;
-        ("pending", id) — a matching unapproved record exists;
-        ("none", None) — no matching record.
+        Returns one of ("approved", id, state) — record found and burned;
+        ("pending", id, state) — a matching unapproved record exists;
+        ("none", None, {}) — no matching record.
+
+        ``state`` is the live-state snapshot captured when the request was
+        created — what the human's approval actually referred to.
         """
         wanted = _args_hash(tool, args)
         for record in self.list_pending():
             if record.get("tool") == tool and record.get("args_hash") == wanted:
+                state = record.get("state") or {}
                 if record.get("approved"):
                     self._path(record["id"]).unlink(missing_ok=True)  # burn on use
-                    return "approved", record["id"]
-                return "pending", record["id"]
-        return "none", None
+                    return "approved", record["id"], state
+                return "pending", record["id"], state
+        return "none", None, {}
 
 
 class ApprovalSchema(BaseModel):
@@ -223,14 +246,21 @@ class ApprovalGate:
         args: dict[str, Any],
         action: str,
         live_state: str,
+        state: dict[str, Any] | None = None,
     ) -> Decision:
         message = (
             f"⚠ Cluster write requested\n{action}\nLive state: {live_state}\nApprove this change?"
         )
         if self._client_supports_elicitation(ctx):
             result: Any = None
-            with anyio.move_on_after(self._settings.approval_timeout_seconds):
-                result = await ctx.elicit(message=message, schema=ApprovalSchema)
+            try:
+                with anyio.move_on_after(self._settings.approval_timeout_seconds):
+                    result = await ctx.elicit(message=message, schema=ApprovalSchema)
+            except Exception as exc:
+                # A broken elicitation exchange is a denial, never an exception:
+                # raw errors must not reach the model, and no-answer is no consent.
+                log.warning("elicitation_failed", tool=tool, error_type=type(exc).__name__)
+                return Decision(approved=False, via="elicitation", detail="approval request failed")
             if result is None:
                 return Decision(approved=False, via="elicitation", detail="approval timed out")
             approved = result.action == "accept" and bool(
@@ -241,17 +271,19 @@ class ApprovalGate:
 
         # Out-of-band fallback: the client cannot render an approval prompt, so
         # the request is parked and the human approves via `janus-mcp approve <id>`.
-        state, approval_id = self._store.consume(tool, args)
-        if state == "approved":
-            return Decision(approved=True, via="oob-cli", pending_id=approval_id)
-        if state == "pending":
+        status, approval_id, stored_state = self._store.consume(tool, args)
+        if status == "approved":
+            return Decision(
+                approved=True, via="oob-cli", pending_id=approval_id, state=stored_state
+            )
+        if status == "pending":
             return Decision(
                 approved=False,
                 via="oob-pending",
                 pending_id=approval_id,
                 detail="awaiting operator approval",
             )
-        approval_id = self._store.create(tool, args, action)
+        approval_id = self._store.create(tool, args, action, state)
         return Decision(
             approved=False,
             via="oob-created",

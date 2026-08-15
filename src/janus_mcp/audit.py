@@ -57,5 +57,14 @@ class AuditLog:
     def log_approved(self, tool: str, **fields: Any) -> None:
         self.write("write_approved", tool=tool, **fields)
 
+    def log_executed(self, tool: str, **fields: Any) -> None:
+        """Recorded only after the mutation succeeded, so approved-but-failed
+        writes are distinguishable from executed ones."""
+        self.write("write_executed", tool=tool, **fields)
+
+    def log_refused(self, tool: str, reason: str, **fields: Any) -> None:
+        """Scope and rate-limit denials — reconnaissance must leave a trace."""
+        self.write("refused", tool=tool, reason=reason, **fields)
+
     def log_error(self, tool: str, error: str, **fields: Any) -> None:
         self.write("tool_error", tool=tool, error=error, **fields)
