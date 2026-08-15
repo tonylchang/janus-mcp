@@ -120,3 +120,66 @@ async def test_live_read_tools_and_canary_absence(tmp_path, cluster_fixtures) ->
     assert not leaks, f"canaries crossed the MCP boundary: {leaks}"
     assert "[REDACTED:aws-key]" in blob
     assert "[REDACTED:jwt]" in blob
+
+
+async def test_live_write_path_scale_and_restart(tmp_path, cluster_fixtures) -> None:
+    """Exercises the real Scale subresource: the readiness read for the approval
+    card, the resourceVersion-bound patch, and the restart annotation patch."""
+    from mcp import types
+    from mcp.shared.memory import create_connected_server_and_client_session as connect
+
+    from janus_mcp.kube import KubeClient
+    from janus_mcp.server import build_server
+    from support import make_audit, make_settings
+
+    settings = make_settings(
+        tmp_path,
+        context=CONTEXT,
+        scope={"allowed_namespaces": ["janus-it"], "denied_namespaces": ["kube-system"]},
+    )
+    kube = KubeClient(settings)
+    server = build_server(settings, kube, make_audit(settings))
+
+    cards: list[str] = []
+
+    async def approve(context, params):
+        cards.append(params.message)
+        return types.ElicitResult(action="accept", content={"confirm": True})
+
+    async with connect(server, elicitation_callback=approve) as client:
+        result = await client.call_tool(
+            "scale_deployment",
+            {"name": "janus-it-web", "namespace": "janus-it", "replicas": 2},
+        )
+        assert not result.isError, result.content[0].text
+        assert "from 1 to 2" in result.content[0].text
+        # the card showed real readiness (N/1 ready), never a fabricated total
+        assert cards and "/1 ready" in cards[0]
+
+        restart = await client.call_tool(
+            "rollout_restart",
+            {
+                "kind": "Deployment",
+                "name": "janus-it-web",
+                "namespace": "janus-it",
+                "reason": "integration test",
+            },
+        )
+        assert not restart.isError, restart.content[0].text
+        assert "restart requested" in restart.content[0].text
+
+        # Scale back so the fixture is reusable on repeat runs. The restart above
+        # leaves the Deployment actively reconciling, so the RV-bound patch may
+        # 409 — that is the bait-and-switch guard failing safe; only the typed
+        # conflict error is acceptable, and a retry (fresh read, fresh approval)
+        # must eventually succeed.
+        with anyio.fail_after(60):
+            while True:
+                back = await client.call_tool(
+                    "scale_deployment",
+                    {"name": "janus-it-web", "namespace": "janus-it", "replicas": 1},
+                )
+                if not back.isError:
+                    break
+                assert "conflict" in back.content[0].text, back.content[0].text
+                await anyio.sleep(2)
