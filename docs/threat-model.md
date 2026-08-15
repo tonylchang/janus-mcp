@@ -54,6 +54,7 @@ winning move is to never put secrets there.
 | Prompt injection via log/event text | Writes always require human approval; untrusted-output framing; static tool descriptions; approval card shows live state + exact change, fetched at approval time |
 | Approval bait-and-switch (approve A, execute B) | Argument-hash binding; burn-on-use; fresh-read `resourceVersion` carried in the patch, 409 on conflict |
 | Secret-probing via `grep` match counts | grep filters *after* redaction |
+| Masked-value probing via field selectors (`spec.nodeName=...` match/no-match oracle) | Field selectors are allowlisted per tool; fields whose values are masked are not filterable |
 | Error messages leaking the API server URL (urllib3 embeds it) | All client exceptions mapped to typed generic messages; details go to local stderr only |
 | Enumeration via not-found errors | Names validated and scope-checked before any API call |
 | Command injection | No shell-outs anywhere; the Kubernetes client library is the only egress; `subprocess` is never imported |

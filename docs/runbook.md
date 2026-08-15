@@ -63,7 +63,11 @@ janus-mcp approve <id>         # approve one
 ```
 
 Then tell the assistant to re-issue the call with the same arguments. Approvals
-expire (2.5× `approval_timeout_seconds`) and are burned on first use.
+expire (`write_tools.oob_approval_ttl_seconds`, default 10 minutes) and are
+burned on first use. Scale approvals are additionally bound to the
+`resourceVersion` observed when the request was created: if the object changed
+while the approval waited (an HPA, a colleague), the write aborts with a
+conflict instead of applying to state you never saw — re-request and re-approve.
 
 ## Audit
 
