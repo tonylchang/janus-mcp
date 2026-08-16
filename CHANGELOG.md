@@ -4,6 +4,16 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
+## [Unreleased]
+
+### Added
+
+- `diagnose_namespace` MCP prompt: a structured triage playbook (overview →
+  pods → warning events → targeted logs → synthesized diagnosis) for clients
+  that support prompts. The prompt is a static template parameterized only by
+  a validated, in-scope namespace — it performs no cluster reads itself, and
+  scope refusals are audited like any other entry point.
+
 ## [0.2.0] — 2026-08-15
 
 A security-hardening release. A deep review of the redaction pipeline, the

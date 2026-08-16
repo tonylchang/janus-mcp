@@ -225,6 +225,43 @@ async def test_tool_descriptions_are_static(server, fake_kube) -> None:
     assert fake_kube.calls == []  # listing tools touches the cluster not at all
 
 
+async def test_diagnose_prompt_is_static_and_in_scope_only(server, fake_kube) -> None:
+    """The prompt is a template: it must guide without touching the cluster,
+    and it must respect namespace scope like every other entry point."""
+    async with connect(server) as client:
+        prompts = (await client.list_prompts()).prompts
+        assert [p.name for p in prompts] == ["diagnose_namespace"]
+
+        result = await client.get_prompt("diagnose_namespace", {"namespace": "prod"})
+        text = result.messages[0].content.text
+        for tool in ("get_cluster_summary", "get_pods", "get_events", "get_logs"):
+            assert tool in text
+        assert "'prod'" in text
+        # untrusted-output and redaction ground rules ride along
+        assert "UNTRUSTED WORKLOAD OUTPUT" in text
+        assert "[REDACTED:*]" in text
+    # rendering the prompt made ZERO cluster calls — it is a pure template
+    assert fake_kube.calls == []
+    for canary in support.ALL_CANARIES:
+        assert canary not in text
+
+
+async def test_diagnose_prompt_refuses_out_of_scope_namespace(server, fake_kube, settings) -> None:
+    from mcp.shared.exceptions import McpError
+
+    async with connect(server) as client:
+        with pytest.raises(McpError) as exc:
+            await client.get_prompt("diagnose_namespace", {"namespace": "kube-system"})
+        assert "denied" in str(exc.value)
+        assert support.FAKE_API_SERVER not in str(exc.value)
+        with pytest.raises(McpError):
+            await client.get_prompt("diagnose_namespace", {"namespace": "../etc"})
+    assert fake_kube.calls == []
+    # the refusal left an audit trace like any other scope denial
+    events = _audit_events(settings)
+    assert any(e["event"] == "refused" and e["tool"] == "diagnose_namespace" for e in events)
+
+
 async def test_cluster_summary_resource_is_listed_and_sanitized(server) -> None:
     """The cluster://summary resource serves the same redacted content as the
     summary tool — and nothing else."""

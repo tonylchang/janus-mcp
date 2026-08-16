@@ -47,13 +47,13 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 - ✍️ **Guarded write operations** — rollout restart, scale, and more, with a human‑in‑the‑loop.
 - 🧹 **Pluggable redaction engine** — sensible defaults, easily extended to your own patterns.
 - 🧭 **Cluster overview, two ways** — the `get_cluster_summary` tool, plus a pinnable `cluster://summary` MCP resource that gives the LLM context without a flurry of tool calls.
+- 🩺 **Guided triage** — the `diagnose_namespace` prompt template walks the model through a structured investigation (overview → pods → warnings → targeted logs → diagnosis) in any client that supports MCP prompts.
 - 🧪 **Works with any MCP client** — Claude Code, Claude Desktop, VS Code, Codex, or your own agent loop.
 
 ## Roadmap
 
 - Homebrew / container distribution (PyPI: [`janus-mcp-server`](https://pypi.org/project/janus-mcp-server/) ✓)
 - Streamable HTTP sidecar mode (bearer token + Origin validation)
-- `diagnose_namespace` prompt template
 
 ## Quick start
 

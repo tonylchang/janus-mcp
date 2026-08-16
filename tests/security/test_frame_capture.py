@@ -66,6 +66,8 @@ async def test_full_session_leaks_nothing(tmp_path) -> None:
         await client.call_tool("get_cluster_summary", {})
         await client.list_resources()
         await client.read_resource(AnyUrl("cluster://summary"))
+        await client.list_prompts()
+        await client.get_prompt("diagnose_namespace", {"namespace": "prod"})
         await client.call_tool("list_namespaces", {})
         # an approved write
         await client.call_tool(
