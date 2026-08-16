@@ -35,11 +35,11 @@
 <div data-theme="{{ theme }}" style="background: var(--color-bg); color: var(--color-text); font-family: var(--font-body); font-size: 17px; line-height: 1.65; min-height: 100vh;">
 
   <nav class="nav" style="position: sticky; top: 0; z-index: 20; background: var(--color-bg); padding-inline: clamp(20px, 5vw, 72px); gap: 24px;">
-    <a class="nav-brand" href="/" style="letter-spacing: -0.01em; text-decoration: none; color: inherit;">JANUS<span style="color: var(--color-accent);">·</span>MCP</a>
-    <a href="/quick-start">Quick start</a>
-    <a href="/operator-runbook" aria-current="page">Runbook</a>
-    <a href="/threat-model">Threat model</a>
-    <a href="/least-privilege-rbac">RBAC</a>
+    <a class="nav-brand" href="https://janus-mcp.ns47.com/" style="letter-spacing: -0.01em; text-decoration: none; color: inherit;">JANUS<span style="color: var(--color-accent);">·</span>MCP</a>
+    <a href="https://janus-mcp.ns47.com/quick-start">Quick start</a>
+    <a href="https://janus-mcp.ns47.com/operator-runbook" aria-current="page">Runbook</a>
+    <a href="https://janus-mcp.ns47.com/threat-model">Threat model</a>
+    <a href="https://janus-mcp.ns47.com/least-privilege-rbac">RBAC</a>
     <div style="display: flex; border: 1px solid var(--color-divider);">
       <button onClick="{{ pickSystem }}" style="{{ themeSystem }}">System</button>
       <button onClick="{{ pickLight }}" style="{{ themeLight }}">Light</button>
@@ -78,7 +78,7 @@
 
 # from a checkout:
 uv sync</pre>
-          <p style="margin: 0;">Full client recipes live in the <a href="/quick-start">quick start</a>.</p>
+          <p style="margin: 0;">Full client recipes live in the <a href="https://janus-mcp.ns47.com/quick-start">quick start</a>.</p>
         </section>
         <hr class="hr" style="margin: 32px 0;">
 
@@ -89,7 +89,7 @@ uv sync</pre>
 kubectl apply -f rbac/janus-mcp-rbac.yaml          # edit namespaces first
 # then create a kubeconfig context bound to the janus-mcp ServiceAccount token,
 # e.g. named limited-sa@prod-cluster</pre>
-          <p style="margin: 0;">What the manifests grant, and what they deliberately omit, is broken down in <a href="/least-privilege-rbac">least-privilege RBAC</a>.</p>
+          <p style="margin: 0;">What the manifests grant, and what they deliberately omit, is broken down in <a href="https://janus-mcp.ns47.com/least-privilege-rbac">least-privilege RBAC</a>.</p>
         </section>
         <hr class="hr" style="margin: 32px 0;">
 
@@ -113,7 +113,7 @@ $EDITOR ~/.config/janus-mcp/config.yaml   # context, namespaces, write_tools</pr
     }
   }
 }</pre>
-          <p style="margin: 0;">VS Code, Codex CLI and Cursor recipes are in the <a href="/quick-start">quick start</a>.</p>
+          <p style="margin: 0;">VS Code, Codex CLI and Cursor recipes are in the <a href="https://janus-mcp.ns47.com/quick-start">quick start</a>.</p>
         </section>
         <hr class="hr" style="margin: 32px 0;">
 
@@ -174,14 +174,14 @@ JANUS_KIND_TEST=1 uv run pytest tests/integration -m integration</pre>
     <div style="max-width: 1180px; margin: 0 auto; padding: clamp(36px, 5vw, 52px) clamp(20px, 5vw, 72px) clamp(28px, 4vw, 40px);">
       <div style="display: flex; flex-wrap: nowrap; gap: 8px; overflow: auto;">
         <a class="btn" href="https://github.com/tonylchang/janus-mcp" target="_blank" rel="noopener" style="background: #fff; color: #ae1800; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Clone the repo</a>
-        <a class="btn" href="/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start</a>
-        <a class="btn" href="/threat-model" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Threat model</a>
-        <a class="btn" href="/least-privilege-rbac" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Least-privilege RBAC</a>
+        <a class="btn" href="https://janus-mcp.ns47.com/quick-start" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Quick start</a>
+        <a class="btn" href="https://janus-mcp.ns47.com/threat-model" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Threat model</a>
+        <a class="btn" href="https://janus-mcp.ns47.com/least-privilege-rbac" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">Least-privilege RBAC</a>
         <a class="btn" href="https://modelcontextprotocol.io" target="_blank" rel="noopener" style="border-color: rgba(255,255,255,0.6); color: #fff; padding: 11px 14px; font-size: 14px; white-space: nowrap; flex: none;">About MCP</a>
       </div>
       <div style="height: 2px; background: rgba(255,255,255,0.35); margin: clamp(28px, 4vw, 40px) 0 22px;"></div>
       <div style="display: flex; flex-wrap: wrap; gap: 16px 40px; align-items: baseline; font-size: 14px;">
-        <a href="/" style="font-family: var(--font-heading); font-weight: 800; margin-right: auto; color: #fff; text-decoration: none;">JANUS·MCP</a>
+        <a href="https://janus-mcp.ns47.com/" style="font-family: var(--font-heading); font-weight: 800; margin-right: auto; color: #fff; text-decoration: none;">JANUS·MCP</a>
         <span style="color: rgba(255,255,255,0.75);">MIT licensed, in active development</span>
       </div>
     </div>
