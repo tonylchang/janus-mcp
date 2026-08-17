@@ -68,7 +68,15 @@ def make_settings(tmp_path: Path, **overrides: Any) -> Settings:
         },
         "read_only": False,
         "write_tools": {
-            "enabled": ["rollout_restart", "scale_deployment"],
+            "enabled": [
+                "rollout_restart",
+                "scale_deployment",
+                "delete_pod",
+                "rollout_undo",
+                "set_cronjob_suspend",
+                "trigger_cronjob",
+                "cordon_node",
+            ],
             "max_replicas": 20,
             "allow_scale_to_zero": False,
             "approval_timeout_seconds": 0.5,
@@ -106,6 +114,9 @@ class FakeKube:
             status_replicas=2,
             resource_version="12345",
         )
+        self.cronjob_suspended = False
+        self.node_unschedulable = False
+        self.deleted_pods: list[tuple[str, str, str]] = []
 
     def _record(self, method: str, **kwargs: Any) -> None:
         self.calls.append((method, kwargs))
@@ -164,11 +175,18 @@ class FakeKube:
             "Deployment": "deployment.json",
             "ConfigMap": "configmap.json",
             "Service": "service.json",
+            "CronJob": "cronjob.json",
             "Node": "node.json",
         }
         if kind not in fixture_by_kind:
             raise KubeError(f"not found: {kind} {name}")
         obj = load_fixture(fixture_by_kind[kind])
+        if kind == "CronJob":
+            obj = dict(obj)
+            obj["spec"] = dict(obj["spec"], suspend=self.cronjob_suspended)
+        if kind == "Node":
+            obj = dict(obj)
+            obj["spec"] = dict(obj.get("spec") or {}, unschedulable=self.node_unschedulable)
         if name != obj["metadata"]["name"]:
             raise KubeError(f"not found: {kind} {namespace}/{name}")
         return dict(obj)
@@ -206,6 +224,53 @@ class FakeKube:
     async def list_nodes(self) -> list[dict[str, Any]]:
         self._record("list_nodes")
         return [load_fixture("node.json")]
+
+    async def list_objects(
+        self, kind: str, namespace: str, label_selector: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        self._record(
+            "list_objects",
+            kind=kind,
+            namespace=namespace,
+            label_selector=label_selector,
+            limit=limit,
+        )
+        if namespace != "prod":
+            return []
+        if kind == "ReplicaSet":
+            return [dict(rs) for rs in load_fixture("replicasets.json")]
+        fixture_by_kind = {
+            "Deployment": "deployment.json",
+            "Service": "service.json",
+            "ConfigMap": "configmap.json",
+            "CronJob": "cronjob.json",
+        }
+        if kind not in fixture_by_kind:
+            return []
+        return [dict(load_fixture(fixture_by_kind[kind]))]
+
+    async def list_replica_sets(
+        self, namespace: str, label_selector: str | None
+    ) -> list[dict[str, Any]]:
+        self._record("list_replica_sets", namespace=namespace, label_selector=label_selector)
+        if namespace != "prod":
+            return []
+        return [dict(rs) for rs in load_fixture("replicasets.json")]
+
+    async def list_pod_metrics(self, namespace: str) -> list[dict[str, Any]]:
+        self._record("list_pod_metrics", namespace=namespace)
+        if namespace != "prod":
+            return []
+        return [dict(m) for m in load_fixture("pod_metrics.json")]
+
+    async def list_node_metrics(self) -> list[dict[str, Any]]:
+        self._record("list_node_metrics")
+        return [
+            {
+                "metadata": {"name": "ip-10-0-1-23.ec2.internal"},
+                "usage": {"cpu": "2", "memory": "8Gi"},
+            }
+        ]
 
     async def server_version(self) -> str:
         self._record("server_version")
@@ -248,6 +313,92 @@ class FakeKube:
         result["metadata"] = dict(result["metadata"])
         result["metadata"]["generation"] = 15
         return result
+
+    async def delete_pod(self, name: str, namespace: str, expected_uid: str) -> None:
+        self._record("delete_pod", name=name, namespace=namespace, expected_uid=expected_uid)
+        pod = load_fixture("pod.json")
+        if name != pod["metadata"]["name"] or namespace != "prod":
+            raise KubeError(f"not found: pod {namespace}/{name}")
+        if expected_uid != pod["metadata"]["uid"]:
+            raise KubeError(
+                f"conflict: pod {namespace}/{name} changed since it was read; re-read and retry"
+            )
+        self.deleted_pods.append((namespace, name, expected_uid))
+
+    async def patch_deployment_template(
+        self,
+        name: str,
+        namespace: str,
+        template: dict[str, Any],
+        expected_resource_version: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        self._record(
+            "patch_deployment_template",
+            name=name,
+            namespace=namespace,
+            template=template,
+            expected_resource_version=expected_resource_version,
+            reason=reason,
+        )
+        dep = dict(load_fixture("deployment.json"))
+        if expected_resource_version != dep["metadata"]["resourceVersion"]:
+            raise KubeError(
+                f"conflict: Deployment {namespace}/{name} changed since it was read; "
+                "re-read and retry"
+            )
+        dep["metadata"] = dict(dep["metadata"], generation=15)
+        return dep
+
+    async def set_cronjob_suspend(
+        self, name: str, namespace: str, suspend: bool, expected_resource_version: str
+    ) -> dict[str, Any]:
+        self._record(
+            "set_cronjob_suspend",
+            name=name,
+            namespace=namespace,
+            suspend=suspend,
+            expected_resource_version=expected_resource_version,
+        )
+        cronjob = dict(load_fixture("cronjob.json"))
+        if expected_resource_version != cronjob["metadata"]["resourceVersion"]:
+            raise KubeError(
+                f"conflict: CronJob {namespace}/{name} changed since it was read; re-read and retry"
+            )
+        self.cronjob_suspended = suspend
+        cronjob["spec"] = dict(cronjob["spec"], suspend=suspend)
+        return cronjob
+
+    async def create_job_from_cronjob(
+        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+    ) -> dict[str, Any]:
+        self._record(
+            "create_job_from_cronjob",
+            cronjob_name=cronjob_name,
+            namespace=namespace,
+            job_name=job_name,
+            reason=reason,
+        )
+        cronjob = load_fixture("cronjob.json")
+        if cronjob_name != cronjob["metadata"]["name"] or namespace != "prod":
+            raise KubeError(f"not found: CronJob {namespace}/{cronjob_name}")
+        return {"kind": "Job", "metadata": {"name": job_name, "namespace": namespace}}
+
+    async def set_node_unschedulable(
+        self, name: str, desired: bool, expected_resource_version: str
+    ) -> dict[str, Any]:
+        self._record(
+            "set_node_unschedulable",
+            name=name,
+            desired=desired,
+            expected_resource_version=expected_resource_version,
+        )
+        node = dict(load_fixture("node.json"))
+        if expected_resource_version != node["metadata"]["resourceVersion"]:
+            raise KubeError(f"conflict: Node {name} changed since it was read; re-read and retry")
+        self.node_unschedulable = desired
+        node["spec"] = dict(node.get("spec") or {}, unschedulable=desired)
+        return node
 
     def calls_for(self, method: str) -> list[dict[str, Any]]:
         return [kwargs for name, kwargs in self.calls if name == method]

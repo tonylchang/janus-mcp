@@ -191,6 +191,187 @@ def render_event_lines(events: list[dict[str, Any]], now: datetime | None = None
     return _columns(rows)
 
 
+def _resource_status(kind: str, obj: dict[str, Any], now: datetime | None = None) -> str:
+    spec = obj.get("spec") or {}
+    status = obj.get("status") or {}
+    if kind in ("Deployment", "StatefulSet", "ReplicaSet"):
+        return f"{status.get('readyReplicas', 0)}/{spec.get('replicas', 0)} ready"
+    if kind == "DaemonSet":
+        return f"{status.get('numberReady', 0)}/{status.get('desiredNumberScheduled', 0)} ready"
+    if kind == "Job":
+        parts = [f"{status.get('succeeded', 0)} succeeded"]
+        if status.get("failed"):
+            parts.append(f"{status['failed']} failed")
+        if status.get("active"):
+            parts.append(f"{status['active']} active")
+        return ", ".join(parts)
+    if kind == "CronJob":
+        suspend = "suspended" if spec.get("suspend") else "active"
+        last = _format_age(status.get("lastScheduleTime"), now)
+        return f"{spec.get('schedule', '?')} ({suspend}, last run {last} ago)"
+    if kind == "Service":
+        return f"{spec.get('type', 'ClusterIP')} {spec.get('clusterIP', '')}".strip()
+    if kind == "Ingress":
+        hosts = [r.get("host", "*") for r in spec.get("rules") or []]
+        return ",".join(hosts) or "-"
+    if kind == "ConfigMap":
+        keys = len(obj.get("data") or {}) + len(obj.get("binaryData") or {})
+        return f"{keys} keys"
+    if kind == "PersistentVolumeClaim":
+        capacity = (status.get("capacity") or {}).get("storage", "?")
+        return f"{status.get('phase', '?')} {capacity}"
+    if kind == "HorizontalPodAutoscaler":
+        return (
+            f"{status.get('currentReplicas', 0)} current "
+            f"({spec.get('minReplicas', 1)}-{spec.get('maxReplicas', '?')})"
+        )
+    if kind == "Endpoints":
+        ready = sum(len(s.get("addresses") or []) for s in obj.get("subsets") or [])
+        not_ready = sum(len(s.get("notReadyAddresses") or []) for s in obj.get("subsets") or [])
+        suffix = f" (+{not_ready} not ready)" if not_ready else ""
+        return f"{ready} addresses{suffix}"
+    if kind == "ResourceQuota":
+        return f"{len(status.get('hard') or spec.get('hard') or {})} tracked resources"
+    if kind == "LimitRange":
+        return f"{len(spec.get('limits') or [])} limits"
+    if kind == "PodDisruptionBudget":
+        return f"disruptionsAllowed={status.get('disruptionsAllowed', '?')}"
+    return "-"
+
+
+def render_resource_table(
+    kind: str, objs: list[dict[str, Any]], now: datetime | None = None
+) -> str:
+    rows = [["NAME", "STATUS", "AGE"]]
+    for obj in objs:
+        meta = obj.get("metadata") or {}
+        rows.append(
+            [
+                str(meta.get("name", "?")),
+                _resource_status(kind, obj, now),
+                _format_age(meta.get("creationTimestamp"), now),
+            ]
+        )
+    return _columns(rows)
+
+
+def _parse_cpu_millis(quantity: Any) -> float:
+    """Kubernetes CPU quantity -> millicores."""
+    s = str(quantity)
+    try:
+        if s.endswith("n"):
+            return float(s[:-1]) / 1_000_000
+        if s.endswith("u"):
+            return float(s[:-1]) / 1_000
+        if s.endswith("m"):
+            return float(s[:-1])
+        return float(s) * 1000
+    except ValueError:
+        return 0.0
+
+
+_MEM_FACTORS = {
+    "Ki": 1 / 1024,
+    "Mi": 1.0,
+    "Gi": 1024.0,
+    "Ti": 1024.0 * 1024,
+    "k": 1e3 / (1024 * 1024),
+    "M": 1e6 / (1024 * 1024),
+    "G": 1e9 / (1024 * 1024),
+}
+
+
+def _parse_mem_mib(quantity: Any) -> float:
+    """Kubernetes memory quantity -> MiB."""
+    s = str(quantity)
+    for suffix, factor in _MEM_FACTORS.items():
+        if s.endswith(suffix):
+            try:
+                return float(s[: -len(suffix)]) * factor
+            except ValueError:
+                return 0.0
+    try:
+        return float(s) / (1024 * 1024)
+    except ValueError:
+        return 0.0
+
+
+def _fmt_cpu(millis: float) -> str:
+    return f"{millis:.0f}m"
+
+
+def _fmt_mem(mib: float) -> str:
+    return f"{mib:.0f}Mi"
+
+
+def render_usage_table(pod_metrics: list[dict[str, Any]], pods: list[dict[str, Any]]) -> str:
+    """Join live usage (metrics.k8s.io) with requests/limits from the pod spec."""
+    limits_by_pod: dict[str, tuple[float, float, float, float]] = {}
+    for pod in pods:
+        name = (pod.get("metadata") or {}).get("name", "?")
+        cpu_req = cpu_lim = mem_req = mem_lim = 0.0
+        for container in (pod.get("spec") or {}).get("containers") or []:
+            resources = container.get("resources") or {}
+            requests = resources.get("requests") or {}
+            limits = resources.get("limits") or {}
+            cpu_req += _parse_cpu_millis(requests.get("cpu", 0))
+            cpu_lim += _parse_cpu_millis(limits.get("cpu", 0))
+            mem_req += _parse_mem_mib(requests.get("memory", 0))
+            mem_lim += _parse_mem_mib(limits.get("memory", 0))
+        limits_by_pod[name] = (cpu_req, cpu_lim, mem_req, mem_lim)
+
+    rows = [["POD", "CPU", "CPU_REQ", "CPU_LIM", "MEMORY", "MEM_REQ", "MEM_LIM"]]
+    for item in sorted(pod_metrics, key=lambda m: (m.get("metadata") or {}).get("name", "")):
+        name = (item.get("metadata") or {}).get("name", "?")
+        cpu = sum(
+            _parse_cpu_millis((c.get("usage") or {}).get("cpu", 0))
+            for c in item.get("containers") or []
+        )
+        mem = sum(
+            _parse_mem_mib((c.get("usage") or {}).get("memory", 0))
+            for c in item.get("containers") or []
+        )
+        cpu_req, cpu_lim, mem_req, mem_lim = limits_by_pod.get(name, (0.0, 0.0, 0.0, 0.0))
+        rows.append(
+            [
+                str(name),
+                _fmt_cpu(cpu),
+                _fmt_cpu(cpu_req) if cpu_req else "-",
+                _fmt_cpu(cpu_lim) if cpu_lim else "-",
+                _fmt_mem(mem),
+                _fmt_mem(mem_req) if mem_req else "-",
+                _fmt_mem(mem_lim) if mem_lim else "-",
+            ]
+        )
+    return _columns(rows)
+
+
+def unified_yaml_diff(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    from_label: str,
+    to_label: str,
+    max_lines: int = 120,
+) -> str:
+    """Unified diff of two ALREADY-SANITIZED objects, line-capped."""
+    import difflib
+
+    diff = list(
+        difflib.unified_diff(
+            render_yaml(before).splitlines(),
+            render_yaml(after).splitlines(),
+            fromfile=from_label,
+            tofile=to_label,
+            lineterm="",
+        )
+    )
+    if not diff:
+        return "(no differences)"
+    if len(diff) > max_lines:
+        diff = [*diff[:max_lines], f"... diff truncated ({len(diff) - max_lines} more lines)"]
+    return "\n".join(diff)
+
+
 def render_yaml(obj: dict[str, Any]) -> str:
     return yaml.safe_dump(obj, sort_keys=False, default_flow_style=False, allow_unicode=True)
 

@@ -27,7 +27,7 @@ from pydantic import Field
 
 from .audit import AuditLog
 from .config import Settings
-from .kube import BLOCKED_KINDS, KIND_REGISTRY, KubeApi, KubeError
+from .kube import BLOCKED_KINDS, KIND_REGISTRY, LISTABLE_KINDS, KubeApi, KubeError
 from .policy import ApprovalGate, ApprovalStore, RateLimiter, ScopeGuard
 from .redaction import (
     RedactionStats,
@@ -35,9 +35,12 @@ from .redaction import (
     envelope,
     render_event_lines,
     render_pod_table,
+    render_resource_table,
+    render_usage_table,
     render_yaml,
     sanitize_object,
     scrub_text,
+    unified_yaml_diff,
     wrap_untrusted,
 )
 from .validation import (
@@ -76,17 +79,45 @@ DescribableKind = Literal[
     "ConfigMap",
     "PersistentVolumeClaim",
     "HorizontalPodAutoscaler",
+    "Endpoints",
+    "ResourceQuota",
+    "LimitRange",
+    "PodDisruptionBudget",
     "Node",
     "Secret",  # accepted by schema so the policy refusal is explicit, never fetched
+]
+
+ListableKind = Literal[
+    "Deployment",
+    "ReplicaSet",
+    "StatefulSet",
+    "DaemonSet",
+    "Job",
+    "CronJob",
+    "Service",
+    "Ingress",
+    "ConfigMap",
+    "PersistentVolumeClaim",
+    "HorizontalPodAutoscaler",
+    "Endpoints",
+    "ResourceQuota",
+    "LimitRange",
+    "PodDisruptionBudget",
 ]
 
 
 def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
     scope = ScopeGuard(settings.scope)
+    write_rate = settings.limits.rate_per_minute.write
     rates = {
         "get_logs": settings.limits.rate_per_minute.get_logs,
-        "rollout_restart": settings.limits.rate_per_minute.write,
-        "scale_deployment": settings.limits.rate_per_minute.write,
+        "rollout_restart": write_rate,
+        "scale_deployment": write_rate,
+        "delete_pod": write_rate,
+        "rollout_undo": write_rate,
+        "set_cronjob_suspend": write_rate,
+        "trigger_cronjob": write_rate,
+        "cordon_node": write_rate,
     }
     limiter = RateLimiter(rates, settings.limits.rate_per_minute.default)
     store = ApprovalStore(
@@ -408,6 +439,178 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         )
         return result
 
+    @mcp.tool(annotations=_READ_ONLY)
+    async def list_resources(
+        kind: ListableKind,
+        namespace: str,
+        label_selector: str | None = None,
+        limit: Annotated[int, Field(ge=1, le=200)] = 50,
+    ) -> str:
+        """List resources of one kind in a namespace with a per-kind status summary
+        and age. Use get_pods for pods; Secrets are not listable by design."""
+        if kind not in LISTABLE_KINDS:
+            raise ToolError(f"kind '{kind}' is not in the listable-kind allowlist")
+        validate_name(namespace, "namespace")
+        validate_selector(label_selector, "label_selector")
+        validate_bounds(limit, 1, 200, "limit")
+        _check_namespace("list_resources", namespace)
+        _acquire("list_resources")
+        stats = RedactionStats()
+        objs = await _fetch(kube.list_objects(kind, namespace, label_selector, limit))
+        sanitized = [sanitize_object(kind, o, redaction, stats) for o in objs]
+        result = _shape(
+            "list_resources",
+            lambda: render_resource_table(kind, sanitized),
+            stats,
+            kind=kind,
+            ns=namespace,
+            items=len(objs),
+        )
+        audit.log_call(
+            "list_resources",
+            kind=kind,
+            namespace=namespace,
+            items=len(objs),
+            redactions=stats.total,
+        )
+        return result
+
+    @mcp.tool(annotations=_READ_ONLY)
+    async def get_resource_usage(namespace: str) -> str:
+        """Live CPU/memory usage per pod (from the metrics API) joined with the
+        requests and limits from each pod's spec — the `kubectl top` view plus
+        headroom. Requires metrics-server in the cluster."""
+        validate_name(namespace, "namespace")
+        _check_namespace("get_resource_usage", namespace)
+        _acquire("get_resource_usage")
+        stats = RedactionStats()
+        metrics = await _fetch(kube.list_pod_metrics(namespace))
+        pods = await _fetch(kube.list_pods(namespace, None, None, 200))
+
+        def render() -> str:
+            body = render_usage_table(metrics, pods)
+            return body if body else "no pod metrics reported for this namespace"
+
+        result = _shape("get_resource_usage", render, stats, ns=namespace, items=len(metrics))
+        audit.log_call("get_resource_usage", namespace=namespace, items=len(metrics))
+        return result
+
+    _REVISION_ANNOTATION = "deployment.kubernetes.io/revision"
+
+    def _rs_revision(rs: dict[str, Any]) -> int:
+        annotations = (rs.get("metadata") or {}).get("annotations") or {}
+        try:
+            return int(annotations.get(_REVISION_ANNOTATION, 0))
+        except (TypeError, ValueError):
+            return 0
+
+    async def _owned_replica_sets(
+        name: str, namespace: str
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        """(deployment, its ReplicaSets newest revision first) — raw, unsanitized;
+        for kube-layer use only."""
+        dep = await _fetch(kube.get_object("Deployment", name, namespace))
+        match_labels = ((dep.get("spec") or {}).get("selector") or {}).get("matchLabels") or {}
+        selector = ",".join(f"{k}={v}" for k, v in sorted(match_labels.items())) or None
+        replica_sets = await _fetch(kube.list_replica_sets(namespace, selector))
+        owned = [
+            rs
+            for rs in replica_sets
+            if any(
+                owner.get("kind") == "Deployment" and owner.get("name") == name
+                for owner in (rs.get("metadata") or {}).get("ownerReferences") or []
+            )
+        ]
+        owned.sort(key=_rs_revision, reverse=True)
+        return dep, owned
+
+    def _template_of(rs: dict[str, Any]) -> dict[str, Any]:
+        template = dict(((rs.get("spec") or {}).get("template")) or {})
+        # pod-template-hash is ReplicaSet plumbing, not part of the intent
+        meta = dict(template.get("metadata") or {})
+        labels = {k: v for k, v in (meta.get("labels") or {}).items() if k != "pod-template-hash"}
+        if labels:
+            meta["labels"] = labels
+        else:
+            meta.pop("labels", None)
+        template["metadata"] = meta
+        return template
+
+    def _sanitized_template(rs: dict[str, Any], stats: RedactionStats) -> dict[str, Any]:
+        shell = {"kind": "ReplicaSet", "spec": {"template": _template_of(rs)}}
+        sanitized = sanitize_object("ReplicaSet", shell, redaction, stats)
+        return ((sanitized.get("spec") or {}).get("template")) or {}
+
+    @mcp.tool(annotations=_READ_ONLY)
+    async def get_rollout_status(name: str, namespace: str) -> str:
+        """Rollout view of a Deployment: conditions, revision history with per-
+        revision readiness and images, and a sanitized diff of the current vs
+        previous pod template — 'what changed recently', safely."""
+        validate_name(name, "name")
+        validate_name(namespace, "namespace")
+        _check_namespace("get_rollout_status", namespace)
+        _acquire("get_rollout_status")
+        stats = RedactionStats()
+        dep, owned = await _owned_replica_sets(name, namespace)
+
+        def render() -> str:
+            status = dep.get("status") or {}
+            lines = [
+                f"Deployment {namespace}/{name}: "
+                f"{status.get('readyReplicas', 0)}/{(dep.get('spec') or {}).get('replicas', 0)} "
+                f"ready, {status.get('updatedReplicas', 0)} updated, "
+                f"generation {(dep.get('metadata') or {}).get('generation', '?')}",
+                "",
+                "CONDITIONS",
+            ]
+            for cond in status.get("conditions") or []:
+                message = scrub_text(str(cond.get("message", "")), redaction, stats)
+                lines.append(
+                    f"  {cond.get('type', '?')}={cond.get('status', '?')} "
+                    f"{cond.get('reason', '')} — {message}"
+                )
+            lines += ["", "REVISIONS (newest first)"]
+            rows = [["REV", "REPLICASET", "READY", "IMAGES"]]
+            for rs in owned:
+                spec_template = (rs.get("spec") or {}).get("template") or {}
+                images = ",".join(
+                    str(c.get("image", "?"))
+                    for c in (spec_template.get("spec") or {}).get("containers") or []
+                )
+                rows.append(
+                    [
+                        str(_rs_revision(rs)),
+                        str((rs.get("metadata") or {}).get("name", "?")),
+                        f"{(rs.get('status') or {}).get('readyReplicas', 0)}"
+                        f"/{(rs.get('spec') or {}).get('replicas', 0)}",
+                        images,
+                    ]
+                )
+            lines.append(_table(rows))
+            if len(owned) >= 2:
+                current, previous = owned[0], owned[1]
+                lines += [
+                    "",
+                    f"TEMPLATE DIFF (revision {_rs_revision(previous)} → {_rs_revision(current)})",
+                    unified_yaml_diff(
+                        _sanitized_template(previous, stats),
+                        _sanitized_template(current, stats),
+                        f"revision-{_rs_revision(previous)}",
+                        f"revision-{_rs_revision(current)}",
+                    ),
+                ]
+            return "\n".join(lines)
+
+        result = _shape("get_rollout_status", render, stats, ns=namespace, name=name)
+        audit.log_call(
+            "get_rollout_status",
+            namespace=namespace,
+            name=name,
+            revisions=len(owned),
+            redactions=stats.total,
+        )
+        return result
+
     async def _summary_text(via: str) -> str:
         """Shared by the get_cluster_summary tool and the cluster://summary
         resource; both serve the same cached, redacted text."""
@@ -722,11 +925,336 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             )
             return _shape("scale_deployment", body, stats, ns=namespace, name=name)
 
+    def register_delete_pod() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def delete_pod(
+            name: str,
+            namespace: str,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request deletion of one pod (to kick a stuck or wedged instance).
+            Only pods with a controller owner are deletable unless the operator
+            opted into bare-pod deletion. Requires explicit human approval."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            _check_namespace("delete_pod", namespace)
+            gate.check_enabled("delete_pod")
+            _acquire("delete_pod")
+            stats = RedactionStats()
+
+            pod = await _fetch(kube.get_object("Pod", name, namespace))
+            meta = pod.get("metadata") or {}
+            owners = [o for o in meta.get("ownerReferences") or [] if o.get("controller")]
+            if not owners and not settings.write_tools.allow_bare_pod_deletion:
+                audit.log_refused("delete_pod", "policy", namespace=namespace, name=name)
+                raise ToolError(
+                    "this pod has no controller owner, so deleting it is permanent; "
+                    "bare-pod deletion is disabled by operator policy "
+                    "(write_tools.allow_bare_pod_deletion)"
+                )
+            uid = str(meta.get("uid") or "")
+            if not uid:
+                raise ToolError("pod UID unavailable; refusing to delete")
+            status = pod.get("status") or {}
+            restarts = sum(
+                cs.get("restartCount", 0) for cs in status.get("containerStatuses") or []
+            )
+            owner_desc = (
+                ", ".join(f"{o.get('kind')}/{o.get('name')}" for o in owners) or "none (bare pod)"
+            )
+            args = {"name": name, "namespace": namespace, "reason": reason}
+            action = f"Delete pod {namespace}/{name} (controller: {owner_desc}; reason: {reason})"
+            live_state = (
+                f"phase={status.get('phase', '?')}, restarts={restarts}, owner={owner_desc}"
+            )
+            approved, message, approved_state = await _resolve_approval(
+                ctx, "delete_pod", args, action, live_state, state={"uid": uid}
+            )
+            if not approved:
+                return message or "request not approved"
+
+            # The UID precondition binds the delete to the exact pod instance the
+            # approval referred to; a same-name replacement pod 409s instead.
+            expected_uid = (approved_state or {}).get("uid") or uid
+            await _fetch(kube.delete_pod(name, namespace, expected_uid))
+            audit.log_executed("delete_pod", **args)
+            summary_cache.clear()
+            body = (
+                f"deletion requested for pod {namespace}/{name}\n"
+                f"controller: {owner_desc} — a managed pod will be recreated automatically"
+            )
+            return _shape("delete_pod", body, stats, ns=namespace, name=name)
+
+    def register_rollout_undo() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def rollout_undo(
+            name: str,
+            namespace: str,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request a rollback of a Deployment to its previous revision. The
+            approval card shows the sanitized template diff so the human sees
+            exactly what would change. Requires explicit human approval."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            _check_namespace("rollout_undo", namespace)
+            gate.check_enabled("rollout_undo")
+            _acquire("rollout_undo")
+            stats = RedactionStats()
+
+            dep, owned = await _owned_replica_sets(name, namespace)
+            if len(owned) < 2:
+                raise ToolError(
+                    f"Deployment {namespace}/{name} has no previous revision to roll back to"
+                )
+            current, previous = owned[0], owned[1]
+            current_rev, target_rev = _rs_revision(current), _rs_revision(previous)
+            rv = str((dep.get("metadata") or {}).get("resourceVersion") or "")
+            status = dep.get("status") or {}
+            diff = scrub_text(
+                unified_yaml_diff(
+                    _sanitized_template(current, stats),
+                    _sanitized_template(previous, stats),
+                    f"current-revision-{current_rev}",
+                    f"rollback-target-revision-{target_rev}",
+                ),
+                redaction,
+                stats,
+            )
+            target_images = ",".join(
+                str(c.get("image", "?"))
+                for c in (
+                    ((previous.get("spec") or {}).get("template") or {}).get("spec") or {}
+                ).get("containers")
+                or []
+            )
+            args = {
+                "name": name,
+                "namespace": namespace,
+                "to_revision": target_rev,
+                "reason": reason,
+            }
+            action = (
+                f"Roll back Deployment {namespace}/{name}: revision {current_rev} → "
+                f"{target_rev} (images: {target_images}; reason: {reason})"
+            )
+            live_state = (
+                f"{status.get('readyReplicas', 0)}/"
+                f"{(dep.get('spec') or {}).get('replicas', 0)} ready\n"
+                f"Template diff of the proposed rollback:\n{diff}"
+            )
+            approved, message, approved_state = await _resolve_approval(
+                ctx,
+                "rollout_undo",
+                args,
+                action,
+                live_state,
+                state={"resource_version": rv, "to_revision": target_rev},
+            )
+            if not approved:
+                return message or "request not approved"
+
+            approved_rev = (approved_state or {}).get("to_revision") or target_rev
+            if approved_rev != target_rev:
+                raise ToolError(
+                    "the rollback target changed since approval; re-request and re-approve"
+                )
+            expected_rv = (approved_state or {}).get("resource_version") or rv
+            # Raw previous template flows kube-layer -> kube-layer, never
+            # through the model; only the sanitized diff was model/human-visible.
+            result = await _fetch(
+                kube.patch_deployment_template(
+                    name, namespace, _template_of(previous), expected_rv, reason
+                )
+            )
+            audit.log_executed("rollout_undo", **args)
+            summary_cache.clear()
+            new_status = result.get("status") or {}
+            body = (
+                f"rollback requested: Deployment {namespace}/{name} → revision {target_rev}\n"
+                f"generation: {result.get('metadata', {}).get('generation', '?')}  "
+                f"ready: {new_status.get('readyReplicas', 0)}"
+                f"/{new_status.get('replicas', 0)}"
+            )
+            return _shape("rollout_undo", body, stats, ns=namespace, name=name)
+
+    def register_set_cronjob_suspend() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def set_cronjob_suspend(
+            name: str,
+            namespace: str,
+            suspend: bool,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request suspending (true) or resuming (false) a CronJob's schedule.
+            Requires explicit human approval; already-matching state is a no-op."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            _check_namespace("set_cronjob_suspend", namespace)
+            gate.check_enabled("set_cronjob_suspend")
+            _acquire("set_cronjob_suspend")
+            stats = RedactionStats()
+
+            cronjob = await _fetch(kube.get_object("CronJob", name, namespace))
+            spec = cronjob.get("spec") or {}
+            currently_suspended = bool(spec.get("suspend"))
+            if currently_suspended == suspend:
+                body = (
+                    f"CronJob {namespace}/{name} is already "
+                    f"{'suspended' if suspend else 'active'}; no change needed"
+                )
+                return _shape("set_cronjob_suspend", body, stats, ns=namespace, name=name)
+            rv = str((cronjob.get("metadata") or {}).get("resourceVersion") or "")
+            last_run = (cronjob.get("status") or {}).get("lastScheduleTime", "never")
+            verb = "Suspend" if suspend else "Resume"
+            args = {
+                "name": name,
+                "namespace": namespace,
+                "suspend": suspend,
+                "reason": reason,
+            }
+            action = f"{verb} CronJob {namespace}/{name} (reason: {reason})"
+            live_state = (
+                f"schedule {spec.get('schedule', '?')}, currently "
+                f"{'suspended' if currently_suspended else 'active'}, last run {last_run}"
+            )
+            approved, message, approved_state = await _resolve_approval(
+                ctx,
+                "set_cronjob_suspend",
+                args,
+                action,
+                live_state,
+                state={"resource_version": rv},
+            )
+            if not approved:
+                return message or "request not approved"
+
+            expected_rv = (approved_state or {}).get("resource_version") or rv
+            result = await _fetch(kube.set_cronjob_suspend(name, namespace, suspend, expected_rv))
+            audit.log_executed("set_cronjob_suspend", **args)
+            now_suspended = bool((result.get("spec") or {}).get("suspend"))
+            body = f"CronJob {namespace}/{name} is now {'suspended' if now_suspended else 'active'}"
+            return _shape("set_cronjob_suspend", body, stats, ns=namespace, name=name)
+
+    def register_trigger_cronjob() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def trigger_cronjob(
+            name: str,
+            namespace: str,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request an immediate one-off run of a CronJob (creates a Job from
+            its template; the Job name is derived server-side). Requires explicit
+            human approval."""
+            validate_name(name, "name")
+            validate_name(namespace, "namespace")
+            reason = validate_reason(reason)
+            _check_namespace("trigger_cronjob", namespace)
+            gate.check_enabled("trigger_cronjob")
+            _acquire("trigger_cronjob")
+            stats = RedactionStats()
+
+            cronjob = await _fetch(kube.get_object("CronJob", name, namespace))
+            spec = cronjob.get("spec") or {}
+            template_spec = (
+                ((spec.get("jobTemplate") or {}).get("spec") or {}).get("template") or {}
+            ).get("spec") or {}
+            images = ",".join(
+                str(c.get("image", "?")) for c in template_spec.get("containers") or []
+            )
+            args = {"name": name, "namespace": namespace, "reason": reason}
+            action = f"Trigger CronJob {namespace}/{name} now (images: {images}; reason: {reason})"
+            live_state = (
+                f"schedule {spec.get('schedule', '?')}, "
+                f"{'SUSPENDED' if spec.get('suspend') else 'active'}, last run "
+                f"{(cronjob.get('status') or {}).get('lastScheduleTime', 'never')}"
+            )
+            approved, message, _ = await _resolve_approval(
+                ctx, "trigger_cronjob", args, action, live_state
+            )
+            if not approved:
+                return message or "request not approved"
+
+            timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
+            job_name = f"{name[:40].rstrip('-')}-manual-{timestamp}"
+            result = await _fetch(kube.create_job_from_cronjob(name, namespace, job_name, reason))
+            audit.log_executed("trigger_cronjob", job=job_name, **args)
+            created = (result.get("metadata") or {}).get("name", job_name)
+            body = f"created Job {created} in {namespace} from CronJob {name}"
+            return _shape("trigger_cronjob", body, stats, ns=namespace, name=name)
+
+    def register_cordon_node() -> None:
+        @mcp.tool(annotations=_WRITE)
+        async def cordon_node(
+            name: str,
+            unschedulable: bool,
+            reason: Annotated[str, Field(max_length=200)],
+            ctx: Context,  # type: ignore[type-arg]
+        ) -> str:
+            """Request cordoning (unschedulable=true) or uncordoning a node. No
+            drain — evictions stay human-driven. Requires cluster scope AND
+            explicit human approval."""
+            validate_name(name, "name")
+            reason = validate_reason(reason)
+            _check_cluster_scoped("cordon_node")
+            gate.check_enabled("cordon_node")
+            _acquire("cordon_node")
+            stats = RedactionStats()
+
+            node = await _fetch(kube.get_object("Node", name, None))
+            currently = bool((node.get("spec") or {}).get("unschedulable"))
+            if currently == unschedulable:
+                body = (
+                    f"node {name} is already "
+                    f"{'cordoned' if unschedulable else 'schedulable'}; no change needed"
+                )
+                return _shape("cordon_node", body, stats, name=name)
+            ready = next(
+                (
+                    c.get("status", "?")
+                    for c in (node.get("status") or {}).get("conditions") or []
+                    if c.get("type") == "Ready"
+                ),
+                "?",
+            )
+            rv = str((node.get("metadata") or {}).get("resourceVersion") or "")
+            verb = "Cordon" if unschedulable else "Uncordon"
+            args = {"name": name, "unschedulable": unschedulable, "reason": reason}
+            action = f"{verb} node {name} (reason: {reason})"
+            live_state = f"Ready={ready}, currently {'cordoned' if currently else 'schedulable'}"
+            approved, message, approved_state = await _resolve_approval(
+                ctx, "cordon_node", args, action, live_state, state={"resource_version": rv}
+            )
+            if not approved:
+                return message or "request not approved"
+
+            expected_rv = (approved_state or {}).get("resource_version") or rv
+            result = await _fetch(kube.set_node_unschedulable(name, unschedulable, expected_rv))
+            audit.log_executed("cordon_node", **args)
+            now = bool((result.get("spec") or {}).get("unschedulable"))
+            body = f"node {name} is now {'cordoned (unschedulable)' if now else 'schedulable'}"
+            return _shape("cordon_node", body, stats, name=name)
+
     if not settings.read_only:
-        if "rollout_restart" in settings.write_tools.enabled:
-            register_rollout_restart()
-        if "scale_deployment" in settings.write_tools.enabled:
-            register_scale_deployment()
+        registrars = {
+            "rollout_restart": register_rollout_restart,
+            "scale_deployment": register_scale_deployment,
+            "delete_pod": register_delete_pod,
+            "rollout_undo": register_rollout_undo,
+            "set_cronjob_suspend": register_set_cronjob_suspend,
+            "trigger_cronjob": register_trigger_cronjob,
+            "cordon_node": register_cordon_node,
+        }
+        for tool_name, register in registrars.items():
+            if tool_name in settings.write_tools.enabled:
+                register()
 
     return mcp
 

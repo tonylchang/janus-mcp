@@ -1,0 +1,34 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: billing-export
+  namespace: prod
+  creationTimestamp: '2026-05-01T00:00:00Z'
+  annotations:
+    team: billing
+spec:
+  schedule: 0 3 * * *
+  suspend: false
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    metadata:
+      annotations:
+        prometheus.io/scrape: 'true'
+    spec:
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app: billing-export
+        spec:
+          restartPolicy: Never
+          containers:
+          - name: export
+            image: registry.local/billing-export:1.2.0
+            env:
+            - name: DB_PASSWORD
+              value: '[REDACTED:env-value]'
+            - name: EXPORT_TARGET
+              value: '[REDACTED:env-value]'
+status:
+  lastScheduleTime: '2026-06-10T03:00:00Z'

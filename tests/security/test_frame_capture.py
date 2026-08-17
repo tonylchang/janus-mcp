@@ -69,10 +69,44 @@ async def test_full_session_leaks_nothing(tmp_path) -> None:
         await client.list_prompts()
         await client.get_prompt("diagnose_namespace", {"namespace": "prod"})
         await client.call_tool("list_namespaces", {})
-        # an approved write
+        # the expanded read surface — lists, usage, rollout history + diff
+        for kind in ("Deployment", "ReplicaSet", "CronJob", "Service", "ConfigMap"):
+            await client.call_tool("list_resources", {"kind": kind, "namespace": "prod"})
+        await client.call_tool("get_resource_usage", {"namespace": "prod"})
+        await client.call_tool("get_rollout_status", {"name": "payments-api", "namespace": "prod"})
+        await client.call_tool(
+            "describe_resource",
+            {"kind": "CronJob", "name": "billing-export", "namespace": "prod"},
+        )
+        # approved writes across the whole write surface
         await client.call_tool(
             "scale_deployment",
             {"name": "payments-api", "namespace": "prod", "replicas": 4},
+        )
+        await client.call_tool(
+            "delete_pod",
+            {
+                "name": "payments-api-7f9c6d4b-xkq2p",
+                "namespace": "prod",
+                "reason": "wedged instance",
+            },
+        )
+        await client.call_tool(
+            "rollout_undo",
+            {"name": "payments-api", "namespace": "prod", "reason": "bad release"},
+        )
+        await client.call_tool(
+            "set_cronjob_suspend",
+            {
+                "name": "billing-export",
+                "namespace": "prod",
+                "suspend": True,
+                "reason": "incident",
+            },
+        )
+        await client.call_tool(
+            "trigger_cronjob",
+            {"name": "billing-export", "namespace": "prod", "reason": "manual rerun"},
         )
         # an error path: out-of-scope namespace
         error_result = await client.call_tool("get_pods", {"namespace": "kube-system"})
@@ -98,6 +132,36 @@ async def test_full_session_leaks_nothing(tmp_path) -> None:
         "client-certificate-data",
     ):
         assert marker not in capture, f"kubeconfig material in MCP frames: {marker}"
+
+
+async def test_cluster_scoped_session_leaks_nothing(tmp_path) -> None:
+    """Node describe + cordon under cluster scope, frame-captured."""
+    settings = make_settings(
+        tmp_path,
+        scope={
+            "allowed_namespaces": ["prod", "staging"],
+            "denied_namespaces": ["kube-system"],
+            "allow_cluster_scoped": True,
+        },
+    )
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    frames: list[str] = []
+
+    async with capture_session(server, frames, elicitation_callback=_accept) as client:
+        await client.call_tool(
+            "describe_resource", {"kind": "Node", "name": "ip-10-0-1-23.ec2.internal"}
+        )
+        result = await client.call_tool(
+            "cordon_node",
+            {"name": "ip-10-0-1-23.ec2.internal", "unschedulable": True, "reason": "bad disk"},
+        )
+        assert not result.isError
+
+    assert kube.node_unschedulable is True
+    capture = "\n".join(frames)
+    leaks = [canary for canary in support.ALL_CANARIES if canary in capture]
+    assert not leaks, f"CREDENTIAL LEAK across MCP boundary: {leaks}"
 
 
 async def test_declined_write_changes_nothing_and_leaks_nothing(tmp_path) -> None:

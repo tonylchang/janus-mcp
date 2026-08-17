@@ -1,0 +1,4 @@
+POD                          CPU   CPU_REQ  CPU_LIM  MEMORY  MEM_REQ  MEM_LIM
+checkout-6cf54d9f8d-b2xtl    1m    -        -        128Mi   -        -
+payments-api-7f9c6d4b-xkq2p  236m  -        -        489Mi   -        -
+redis-0                      45m   -        -        300Mi   -        -

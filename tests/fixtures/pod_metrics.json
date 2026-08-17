@@ -1,0 +1,47 @@
+[
+  {
+    "metadata": {
+      "name": "payments-api-7f9c6d4b-xkq2p",
+      "namespace": "prod"
+    },
+    "containers": [
+      {
+        "name": "payments-api",
+        "usage": {
+          "cpu": "236m",
+          "memory": "489Mi"
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "checkout-6cf54d9f8d-b2xtl",
+      "namespace": "prod"
+    },
+    "containers": [
+      {
+        "name": "checkout",
+        "usage": {
+          "cpu": "1200000n",
+          "memory": "131072Ki"
+        }
+      }
+    ]
+  },
+  {
+    "metadata": {
+      "name": "redis-0",
+      "namespace": "prod"
+    },
+    "containers": [
+      {
+        "name": "redis",
+        "usage": {
+          "cpu": "45m",
+          "memory": "300Mi"
+        }
+      }
+    ]
+  }
+]

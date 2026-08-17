@@ -1,0 +1,132 @@
+[
+  {
+    "apiVersion": "apps/v1",
+    "kind": "ReplicaSet",
+    "metadata": {
+      "name": "payments-api-7f9c6d4b",
+      "namespace": "prod",
+      "uid": "rsrs1111-2222-3333-4444-555566667777",
+      "resourceVersion": "991090",
+      "creationTimestamp": "2026-06-09T08:00:00Z",
+      "annotations": {
+        "deployment.kubernetes.io/revision": "14"
+      },
+      "labels": {
+        "app": "payments-api",
+        "pod-template-hash": "7f9c6d4b"
+      },
+      "ownerReferences": [
+        {
+          "kind": "Deployment",
+          "name": "payments-api",
+          "controller": true,
+          "uid": "aa1bb2cc-dd3e-4f56-a789-0b1c2d3e4f56"
+        }
+      ]
+    },
+    "spec": {
+      "replicas": 2,
+      "selector": {
+        "matchLabels": {
+          "app": "payments-api",
+          "pod-template-hash": "7f9c6d4b"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "payments-api",
+            "pod-template-hash": "7f9c6d4b"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "payments-api",
+              "image": "registry.local/payments-api:2.4.1",
+              "env": [
+                {
+                  "name": "DB_PASSWORD",
+                  "value": "Tr0ub4dor&3-canary"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "info"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "status": {
+      "replicas": 2,
+      "readyReplicas": 0
+    }
+  },
+  {
+    "apiVersion": "apps/v1",
+    "kind": "ReplicaSet",
+    "metadata": {
+      "name": "payments-api-5d8e7f6a",
+      "namespace": "prod",
+      "uid": "rsrs8888-7777-6666-5555-444433332222",
+      "resourceVersion": "881080",
+      "creationTimestamp": "2026-06-01T08:00:00Z",
+      "annotations": {
+        "deployment.kubernetes.io/revision": "13"
+      },
+      "labels": {
+        "app": "payments-api",
+        "pod-template-hash": "5d8e7f6a"
+      },
+      "ownerReferences": [
+        {
+          "kind": "Deployment",
+          "name": "payments-api",
+          "controller": true,
+          "uid": "aa1bb2cc-dd3e-4f56-a789-0b1c2d3e4f56"
+        }
+      ]
+    },
+    "spec": {
+      "replicas": 0,
+      "selector": {
+        "matchLabels": {
+          "app": "payments-api",
+          "pod-template-hash": "5d8e7f6a"
+        }
+      },
+      "template": {
+        "metadata": {
+          "labels": {
+            "app": "payments-api",
+            "pod-template-hash": "5d8e7f6a"
+          }
+        },
+        "spec": {
+          "containers": [
+            {
+              "name": "payments-api",
+              "image": "registry.local/payments-api:2.4.0",
+              "env": [
+                {
+                  "name": "DB_PASSWORD",
+                  "value": "Tr0ub4dor&3-canary"
+                },
+                {
+                  "name": "LOG_LEVEL",
+                  "value": "info"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "status": {
+      "replicas": 0,
+      "readyReplicas": 0
+    }
+  }
+]

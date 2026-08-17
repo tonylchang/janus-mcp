@@ -43,8 +43,8 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 ## Features
 
 - 🔒 **Zero‑credential exposure** — your `KUBECONFIG` never leaves the process running Janus.
-- 🔍 **Rich read‑only diagnostics** — pods, events, logs, deployments, cluster summaries.
-- ✍️ **Guarded write operations** — rollout restart, scale, and more, with a human‑in‑the‑loop.
+- 🔍 **Rich read‑only diagnostics** — pods, workloads, services, events, logs, endpoints, quotas, live CPU/memory usage vs requests (`kubectl top`+), and rollout history with sanitized template diffs (“what changed recently?”).
+- ✍️ **Guarded write operations** — rollout restart & rollback, scale, delete‑pod (UID‑bound), CronJob suspend/resume/trigger, node cordon — every one behind out‑of‑model human approval, none registered unless the operator enables it.
 - 🧹 **Pluggable redaction engine** — sensible defaults, easily extended to your own patterns.
 - 🧭 **Cluster overview, two ways** — the `get_cluster_summary` tool, plus a pinnable `cluster://summary` MCP resource that gives the LLM context without a flurry of tool calls.
 - 🩺 **Guided triage** — the `diagnose_namespace` prompt template walks the model through a structured investigation (overview → pods → warnings → targeted logs → diagnosis) in any client that supports MCP prompts.

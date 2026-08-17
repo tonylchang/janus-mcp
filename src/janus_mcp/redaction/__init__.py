@@ -13,7 +13,10 @@ from .render import (
     envelope,
     render_event_lines,
     render_pod_table,
+    render_resource_table,
+    render_usage_table,
     render_yaml,
+    unified_yaml_diff,
     wrap_untrusted,
 )
 from .structural import sanitize_object
@@ -26,8 +29,11 @@ __all__ = [
     "envelope",
     "render_event_lines",
     "render_pod_table",
+    "render_resource_table",
+    "render_usage_table",
     "render_yaml",
     "sanitize_object",
     "scrub_text",
+    "unified_yaml_diff",
     "wrap_untrusted",
 ]

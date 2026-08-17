@@ -51,6 +51,9 @@ class WriteToolsSettings(StrictModel):
     # Independent of approval_timeout_seconds, which governs only the
     # elicitation prompt — tuning one must not silently shrink the other.
     oob_approval_ttl_seconds: float = Field(default=600.0, gt=0)
+    # delete_pod only touches pods a controller will recreate. Deleting bare
+    # (ownerless) pods is permanent data-plane destruction — explicit opt-in.
+    allow_bare_pod_deletion: bool = False
 
 
 class RedactionSettings(StrictModel):

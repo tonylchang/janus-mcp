@@ -48,8 +48,16 @@ KIND_REGISTRY: dict[str, bool] = {
     "ConfigMap": True,
     "PersistentVolumeClaim": True,
     "HorizontalPodAutoscaler": True,
+    "Endpoints": True,
+    "ResourceQuota": True,
+    "LimitRange": True,
+    "PodDisruptionBudget": True,
     "Node": False,
 }
+
+# Namespaced kinds list_resources may enumerate. Pod is deliberately absent —
+# get_pods is the richer, purpose-built lister.
+LISTABLE_KINDS = frozenset(k for k, namespaced in KIND_REGISTRY.items() if namespaced) - {"Pod"}
 
 RESTART_ANNOTATION = "kubectl.kubernetes.io/restartedAt"
 REASON_ANNOTATION = "janus-mcp.io/restart-reason"
@@ -109,6 +117,14 @@ class KubeApi(Protocol):
     ) -> str: ...
     async def list_deployments(self, namespace: str) -> list[dict[str, Any]]: ...
     async def list_nodes(self) -> list[dict[str, Any]]: ...
+    async def list_objects(
+        self, kind: str, namespace: str, label_selector: str | None, limit: int
+    ) -> list[dict[str, Any]]: ...
+    async def list_replica_sets(
+        self, namespace: str, label_selector: str | None
+    ) -> list[dict[str, Any]]: ...
+    async def list_pod_metrics(self, namespace: str) -> list[dict[str, Any]]: ...
+    async def list_node_metrics(self) -> list[dict[str, Any]]: ...
     async def server_version(self) -> str: ...
     async def get_scale(self, kind: str, name: str, namespace: str) -> ScaleInfo: ...
     async def scale(
@@ -116,6 +132,24 @@ class KubeApi(Protocol):
     ) -> ScaleInfo: ...
     async def rollout_restart(
         self, kind: str, name: str, namespace: str, reason: str
+    ) -> dict[str, Any]: ...
+    async def delete_pod(self, name: str, namespace: str, expected_uid: str) -> None: ...
+    async def patch_deployment_template(
+        self,
+        name: str,
+        namespace: str,
+        template: dict[str, Any],
+        expected_resource_version: str,
+        reason: str,
+    ) -> dict[str, Any]: ...
+    async def set_cronjob_suspend(
+        self, name: str, namespace: str, suspend: bool, expected_resource_version: str
+    ) -> dict[str, Any]: ...
+    async def create_job_from_cronjob(
+        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+    ) -> dict[str, Any]: ...
+    async def set_node_unschedulable(
+        self, name: str, desired: bool, expected_resource_version: str
     ) -> dict[str, Any]: ...
 
 
@@ -158,6 +192,8 @@ class KubeClient:
         self._batch = client.BatchV1Api(self._api_client)
         self._networking = client.NetworkingV1Api(self._api_client)
         self._autoscaling = client.AutoscalingV2Api(self._api_client)
+        self._policy = client.PolicyV1Api(self._api_client)
+        self._custom = client.CustomObjectsApi(self._api_client)
         self._authz = client.AuthorizationV1Api(self._api_client)
         self._version = client.VersionApi(self._api_client)
 
@@ -176,7 +212,30 @@ class KubeClient:
             "HorizontalPodAutoscaler": (
                 self._autoscaling.read_namespaced_horizontal_pod_autoscaler
             ),
+            "Endpoints": self._core.read_namespaced_endpoints,
+            "ResourceQuota": self._core.read_namespaced_resource_quota,
+            "LimitRange": self._core.read_namespaced_limit_range,
+            "PodDisruptionBudget": self._policy.read_namespaced_pod_disruption_budget,
             "Node": self._core.read_node,
+        }
+        self._listers: dict[str, Callable[..., Any]] = {
+            "Deployment": self._apps.list_namespaced_deployment,
+            "ReplicaSet": self._apps.list_namespaced_replica_set,
+            "StatefulSet": self._apps.list_namespaced_stateful_set,
+            "DaemonSet": self._apps.list_namespaced_daemon_set,
+            "Job": self._batch.list_namespaced_job,
+            "CronJob": self._batch.list_namespaced_cron_job,
+            "Service": self._core.list_namespaced_service,
+            "Ingress": self._networking.list_namespaced_ingress,
+            "ConfigMap": self._core.list_namespaced_config_map,
+            "PersistentVolumeClaim": self._core.list_namespaced_persistent_volume_claim,
+            "HorizontalPodAutoscaler": (
+                self._autoscaling.list_namespaced_horizontal_pod_autoscaler
+            ),
+            "Endpoints": self._core.list_namespaced_endpoints,
+            "ResourceQuota": self._core.list_namespaced_resource_quota,
+            "LimitRange": self._core.list_namespaced_limit_range,
+            "PodDisruptionBudget": self._policy.list_namespaced_pod_disruption_budget,
         }
 
     def _to_dict(self, obj: Any) -> dict[str, Any]:
@@ -276,6 +335,65 @@ class KubeClient:
         result = await self._call("nodes", self._core.list_node)
         return [self._to_dict(item) for item in result.items]
 
+    async def list_objects(
+        self, kind: str, namespace: str, label_selector: str | None, limit: int
+    ) -> list[dict[str, Any]]:
+        lister = self._listers.get(kind)
+        if lister is None:
+            raise KubeError(f"kind '{kind}' is not listable")
+        kwargs: dict[str, Any] = {"limit": limit}
+        if label_selector:
+            kwargs["label_selector"] = label_selector
+        result = await self._call(f"{kind} list in {namespace}", lister, namespace, **kwargs)
+        items = []
+        for item in result.items:
+            data = self._to_dict(item)
+            data.setdefault("kind", kind)
+            items.append(data)
+        return items
+
+    async def list_replica_sets(
+        self, namespace: str, label_selector: str | None
+    ) -> list[dict[str, Any]]:
+        return await self.list_objects("ReplicaSet", namespace, label_selector, 50)
+
+    async def list_pod_metrics(self, namespace: str) -> list[dict[str, Any]]:
+        try:
+            result = await self._call(
+                f"pod metrics in {namespace}",
+                self._custom.list_namespaced_custom_object,
+                "metrics.k8s.io",
+                "v1beta1",
+                namespace,
+                "pods",
+            )
+        except KubeError as exc:
+            if "not found" in exc.safe_message:
+                raise KubeError(
+                    "metrics API unavailable (is metrics-server installed in the cluster?)"
+                ) from None
+            raise
+        items = result.get("items", []) if isinstance(result, dict) else []
+        return [dict(item) for item in items]
+
+    async def list_node_metrics(self) -> list[dict[str, Any]]:
+        try:
+            result = await self._call(
+                "node metrics",
+                self._custom.list_cluster_custom_object,
+                "metrics.k8s.io",
+                "v1beta1",
+                "nodes",
+            )
+        except KubeError as exc:
+            if "not found" in exc.safe_message:
+                raise KubeError(
+                    "metrics API unavailable (is metrics-server installed in the cluster?)"
+                ) from None
+            raise
+        items = result.get("items", []) if isinstance(result, dict) else []
+        return [dict(item) for item in items]
+
     async def server_version(self) -> str:
         info = await self._call("server version", self._version.get_code)
         major = "".join(c for c in str(info.major) if c.isdigit()) or "?"
@@ -352,6 +470,91 @@ class KubeClient:
         }
         what = f"{kind} {namespace}/{name}"
         result = await self._call(what, patcher, name, namespace, body)
+        return dict(self._to_dict(result))
+
+    async def delete_pod(self, name: str, namespace: str, expected_uid: str) -> None:
+        from kubernetes import client
+
+        # The UID precondition binds the delete to the exact pod instance the
+        # approval referred to: a same-name replacement pod aborts with 409.
+        body = client.V1DeleteOptions(preconditions=client.V1Preconditions(uid=expected_uid))
+        await self._call(
+            f"pod {namespace}/{name}",
+            self._core.delete_namespaced_pod,
+            name,
+            namespace,
+            body=body,
+        )
+
+    async def patch_deployment_template(
+        self,
+        name: str,
+        namespace: str,
+        template: dict[str, Any],
+        expected_resource_version: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        annotations = dict(((template.get("metadata") or {}).get("annotations")) or {})
+        annotations[REASON_ANNOTATION] = reason
+        template = dict(template)
+        template["metadata"] = dict(template.get("metadata") or {})
+        template["metadata"]["annotations"] = annotations
+        body = {
+            "metadata": {"resourceVersion": expected_resource_version},
+            "spec": {"template": template},
+        }
+        what = f"Deployment {namespace}/{name}"
+        result = await self._call(
+            what, self._apps.patch_namespaced_deployment, name, namespace, body
+        )
+        return dict(self._to_dict(result))
+
+    async def set_cronjob_suspend(
+        self, name: str, namespace: str, suspend: bool, expected_resource_version: str
+    ) -> dict[str, Any]:
+        body = {
+            "metadata": {"resourceVersion": expected_resource_version},
+            "spec": {"suspend": suspend},
+        }
+        what = f"CronJob {namespace}/{name}"
+        result = await self._call(
+            what, self._batch.patch_namespaced_cron_job, name, namespace, body
+        )
+        return dict(self._to_dict(result))
+
+    async def create_job_from_cronjob(
+        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+    ) -> dict[str, Any]:
+        cronjob = await self.get_object("CronJob", cronjob_name, namespace)
+        job_template = (cronjob.get("spec") or {}).get("jobTemplate") or {}
+        template_meta = job_template.get("metadata") or {}
+        job = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {
+                "name": job_name,
+                "namespace": namespace,
+                "labels": dict(template_meta.get("labels") or {}),
+                "annotations": {
+                    **dict(template_meta.get("annotations") or {}),
+                    "janus-mcp.io/triggered-from": f"cronjob/{cronjob_name}",
+                    REASON_ANNOTATION: reason,
+                },
+            },
+            "spec": job_template.get("spec") or {},
+        }
+        what = f"Job {namespace}/{job_name}"
+        result = await self._call(what, self._batch.create_namespaced_job, namespace, job)
+        return dict(self._to_dict(result))
+
+    async def set_node_unschedulable(
+        self, name: str, desired: bool, expected_resource_version: str
+    ) -> dict[str, Any]:
+        body = {
+            "metadata": {"resourceVersion": expected_resource_version},
+            "spec": {"unschedulable": desired},
+        }
+        result = await self._call(f"Node {name}", self._core.patch_node, name, body)
         return dict(self._to_dict(result))
 
     # ---- startup self-check -------------------------------------------------

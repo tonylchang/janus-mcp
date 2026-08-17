@@ -8,6 +8,32 @@ All notable changes to janus-mcp are documented here. The format follows
 
 ### Added
 
+- **Read tools**:
+  - `list_resources`: enumerate any allowlisted namespaced kind (Deployments,
+    Services, CronJobs, PVCs, HPAs, Endpoints, quotas, …) with a per-kind
+    status summary — the model no longer has to guess names from pod prefixes.
+  - `get_resource_usage`: live per-pod CPU/memory from the metrics API joined
+    with requests/limits from the pod spec (`kubectl top` plus headroom).
+  - `get_rollout_status`: Deployment conditions, revision history with images
+    and readiness, and a sanitized template diff of current vs previous
+    revision — "what changed recently", with credentials masked on both sides.
+- **Readable kinds**: Endpoints (node names masked per policy), ResourceQuota,
+  LimitRange, PodDisruptionBudget.
+- **Write tools** (approval-gated, disabled unless listed in
+  `write_tools.enabled`, each bound to the state the approver saw):
+  - `delete_pod` — kick a stuck pod; the delete carries a UID precondition so
+    a same-name replacement pod aborts with a conflict. Pods without a
+    controller owner are refused unless `write_tools.allow_bare_pod_deletion`.
+  - `rollout_undo` — roll a Deployment back to its previous revision; the
+    approval card shows the sanitized template diff, and the patch is bound to
+    both the observed resourceVersion and the approved target revision.
+  - `set_cronjob_suspend` / `trigger_cronjob` — pause/resume a schedule, or
+    create a one-off Job from the CronJob's template (name derived
+    server-side).
+  - `cordon_node` / uncordon — requires `scope.allow_cluster_scoped`; no drain
+    (evictions stay human-driven).
+- RBAC manifests updated with per-tool grant comments; the new read grants,
+  and optional metrics.k8s.io / node rules.
 - `diagnose_namespace` MCP prompt: a structured triage playbook (overview →
   pods → warning events → targeted logs → synthesized diagnosis) for clients
   that support prompts. The prompt is a static template parameterized only by

@@ -69,3 +69,24 @@ spec:
         - name: web
           image: busybox:1.36
           command: ["/bin/sh", "-c", "sleep 3600"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: janus-it-cron
+  namespace: janus-it
+spec:
+  schedule: "0 3 * * *"
+  suspend: false
+  jobTemplate:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: "arn:aws:iam::000000000000:role/it-canary"
+    spec:
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: noop
+              image: busybox:1.36
+              command: ["true"]

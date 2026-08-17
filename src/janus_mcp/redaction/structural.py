@@ -329,6 +329,27 @@ def _sanitize_namespace(
     return obj
 
 
+def _sanitize_endpoints(
+    obj: dict[str, Any], settings: RedactionSettings, stats: RedactionStats
+) -> dict[str, Any]:
+    """Endpoint addresses are internal pod IPs (kept, like all internal IPs),
+    but each address also names the node it lives on — mask that with the
+    same policy as everywhere else."""
+    if not settings.mask_node_names:
+        return obj
+    subsets = obj.get("subsets")
+    if isinstance(subsets, list):
+        for subset in subsets:
+            for section in ("addresses", "notReadyAddresses"):
+                addresses = subset.get(section)
+                if not isinstance(addresses, list):
+                    continue
+                for address in addresses:
+                    if "nodeName" in address:
+                        address["nodeName"] = MASKED_NODE
+    return obj
+
+
 def _sanitize_default(
     obj: dict[str, Any], settings: RedactionSettings, stats: RedactionStats
 ) -> dict[str, Any]:
@@ -367,6 +388,14 @@ def sanitize_object(
         return _sanitize_node(obj, settings, stats)
     if kind == "Namespace":
         return _sanitize_namespace(obj, settings, stats)
-    if kind in ("PersistentVolumeClaim", "HorizontalPodAutoscaler"):
+    if kind == "Endpoints":
+        return _sanitize_endpoints(obj, settings, stats)
+    if kind in (
+        "PersistentVolumeClaim",
+        "HorizontalPodAutoscaler",
+        "ResourceQuota",
+        "LimitRange",
+        "PodDisruptionBudget",
+    ):
         return obj
     return _sanitize_default(obj, settings, stats)

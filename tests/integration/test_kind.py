@@ -183,3 +183,96 @@ async def test_live_write_path_scale_and_restart(tmp_path, cluster_fixtures) -> 
                     break
                 assert "conflict" in back.content[0].text, back.content[0].text
                 await anyio.sleep(2)
+
+
+async def test_live_expanded_surface(tmp_path, cluster_fixtures) -> None:
+    """The new read tools plus CronJob and delete_pod writes against a real
+    API server: listing, rollout history (the restart in the previous test
+    guarantees >= 2 revisions), metrics absence handled as a typed error,
+    UID-bound pod deletion, and CronJob suspend/trigger."""
+    from mcp import types
+    from mcp.shared.memory import create_connected_server_and_client_session as connect
+
+    from janus_mcp.kube import KubeClient
+    from janus_mcp.server import build_server
+    from support import ALL_CANARIES, make_audit, make_settings
+
+    settings = make_settings(
+        tmp_path,
+        context=CONTEXT,
+        scope={"allowed_namespaces": ["janus-it"], "denied_namespaces": ["kube-system"]},
+    )
+    kube = KubeClient(settings)
+    server = build_server(settings, kube, make_audit(settings))
+
+    async def approve(context, params):
+        return types.ElicitResult(action="accept", content={"confirm": True})
+
+    outputs: list[str] = []
+    async with connect(server, elicitation_callback=approve) as client:
+        for kind in ("Deployment", "ReplicaSet", "CronJob"):
+            result = await client.call_tool(
+                "list_resources", {"kind": kind, "namespace": "janus-it"}
+            )
+            assert not result.isError, result.content[0].text
+            outputs.append(result.content[0].text)
+        assert "janus-it-web" in outputs[0]
+        assert "janus-it-cron" in outputs[2]
+
+        rollout = await client.call_tool(
+            "get_rollout_status", {"name": "janus-it-web", "namespace": "janus-it"}
+        )
+        assert not rollout.isError, rollout.content[0].text
+        assert "REVISIONS" in rollout.content[0].text
+        outputs.append(rollout.content[0].text)
+
+        # kind has no metrics-server: the failure must be typed and helpful
+        usage = await client.call_tool("get_resource_usage", {"namespace": "janus-it"})
+        assert usage.isError
+        assert "metrics API unavailable" in usage.content[0].text
+
+        # describe the CronJob: the planted identity annotation must be gone
+        cron = await client.call_tool(
+            "describe_resource",
+            {"kind": "CronJob", "name": "janus-it-cron", "namespace": "janus-it"},
+        )
+        assert not cron.isError, cron.content[0].text
+        assert "role-arn" not in cron.content[0].text
+        outputs.append(cron.content[0].text)
+
+        # suspend, trigger, resume the CronJob
+        for suspend in (True, False):
+            result = await client.call_tool(
+                "set_cronjob_suspend",
+                {
+                    "name": "janus-it-cron",
+                    "namespace": "janus-it",
+                    "suspend": suspend,
+                    "reason": "integration test",
+                },
+            )
+            assert not result.isError, result.content[0].text
+        trigger = await client.call_tool(
+            "trigger_cronjob",
+            {"name": "janus-it-cron", "namespace": "janus-it", "reason": "integration test"},
+        )
+        assert not trigger.isError, trigger.content[0].text
+        assert "created Job janus-it-cron-manual-" in trigger.content[0].text
+
+        # delete a managed pod of the deployment (UID-bound); the RS recreates it
+        pods = await client.call_tool("get_pods", {"namespace": "janus-it"})
+        web_pod = next(
+            line.split()[0]
+            for line in pods.content[0].text.splitlines()
+            if line.startswith("janus-it-web-")
+        )
+        deleted = await client.call_tool(
+            "delete_pod",
+            {"name": web_pod, "namespace": "janus-it", "reason": "integration test"},
+        )
+        assert not deleted.isError, deleted.content[0].text
+        assert "deletion requested" in deleted.content[0].text
+
+    blob = "\n".join(outputs)
+    leaks = [c for c in ALL_CANARIES if c in blob]
+    assert not leaks, f"canaries crossed the MCP boundary: {leaks}"

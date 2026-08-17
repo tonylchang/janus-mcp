@@ -1,0 +1,61 @@
+{
+  "apiVersion": "batch/v1",
+  "kind": "CronJob",
+  "metadata": {
+    "name": "billing-export",
+    "namespace": "prod",
+    "uid": "cjcj1111-2222-3333-4444-555566667777",
+    "resourceVersion": "775500",
+    "creationTimestamp": "2026-05-01T00:00:00Z",
+    "annotations": {
+      "kubectl.kubernetes.io/last-applied-configuration": "{\"spec\":{\"secret\":\"last-applied-canary-XYZZY\"}}",
+      "team": "billing"
+    }
+  },
+  "spec": {
+    "schedule": "0 3 * * *",
+    "suspend": false,
+    "concurrencyPolicy": "Forbid",
+    "jobTemplate": {
+      "metadata": {
+        "annotations": {
+          "eks.amazonaws.com/role-arn": "arn:aws:iam::123456789012:role/billing-export",
+          "vault.hashicorp.com/agent-inject-token": "true",
+          "prometheus.io/scrape": "true"
+        }
+      },
+      "spec": {
+        "backoffLimit": 2,
+        "template": {
+          "metadata": {
+            "labels": {
+              "app": "billing-export"
+            }
+          },
+          "spec": {
+            "restartPolicy": "Never",
+            "containers": [
+              {
+                "name": "export",
+                "image": "registry.local/billing-export:1.2.0",
+                "env": [
+                  {
+                    "name": "DB_PASSWORD",
+                    "value": "S3cr3tPw!"
+                  },
+                  {
+                    "name": "EXPORT_TARGET",
+                    "value": "s3://billing-exports"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "status": {
+    "lastScheduleTime": "2026-06-10T03:00:00Z"
+  }
+}

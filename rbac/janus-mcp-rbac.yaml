@@ -47,6 +47,16 @@ rules:
       - services
       - configmaps
       - persistentvolumeclaims
+      - endpoints
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list"]
+  # get_resource_usage (safe to omit if metrics-server is not installed)
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
     verbs: ["get", "list"]
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
@@ -79,12 +89,14 @@ subjects:
     namespace: janus-mcp
 ---
 # ONLY apply this Role if write tools are enabled in the janus-mcp config.
+# Each rule maps to specific tools — trim it to the tools you actually enable.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: janus-mcp-write
   namespace: prod
 rules:
+  # rollout_restart, scale_deployment, rollout_undo
   - apiGroups: ["apps"]
     resources:
       - deployments
@@ -93,6 +105,17 @@ rules:
       - statefulsets/scale
       - daemonsets
     verbs: ["patch"]
+  # delete_pod
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  # set_cronjob_suspend / trigger_cronjob
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["patch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -103,6 +126,38 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: janus-mcp-write
+subjects:
+  - kind: ServiceAccount
+    name: janus-mcp
+    namespace: janus-mcp
+---
+# ONLY apply if BOTH scope.allow_cluster_scoped AND the cordon_node write tool
+# are enabled. Node describe/list needs the read half; cordon needs patch.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: janus-mcp-cluster-scoped
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  # node metrics for the cluster summary / usage views (optional)
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+  # cordon_node only:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: janus-mcp-cluster-scoped
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: janus-mcp-cluster-scoped
 subjects:
   - kind: ServiceAccount
     name: janus-mcp

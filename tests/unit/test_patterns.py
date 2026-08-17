@@ -102,6 +102,9 @@ def test_unrecognized_key_random_value_masks_value_only() -> None:
         # DNS-1123-shaped: every generated Kubernetes name looks high-entropy
         "replicaset payments-api-7f9c6d4b has 3 replicas",
         "node ip-10-1-2-3.us-west-2.compute.internal cordoned",
+        # slash-joined forms our own tool output uses
+        "deleted pod prod/payments-api-7f9c6d4b-xkq2p successfully",
+        "created job billing-export-manual-20260817041500 in prod",
         # key=<short-id>: the label must not be judged as part of the blob
         "approval_id=1a2b3c4d granted by operator",
         # pure numbers are ids/timestamps, never judged as secrets

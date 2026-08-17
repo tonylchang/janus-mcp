@@ -168,9 +168,11 @@ def _mask_public_ips(text: str, stats: RedactionStats) -> str:
 
 _HEX_ONLY = re.compile(r"^[0-9A-Fa-f]+$")
 # The DNS-1123 name shape: every Kubernetes resource name, including generated
-# hash suffixes (payments-api-7f9c6d4b). These are legitimately high-entropy
-# and pervasive in diagnostics — masking them destroys the output's value.
-_DNS_SHAPE = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$")
+# hash suffixes (payments-api-7f9c6d4b), plus the slash-joined forms our own
+# output uses ("prod/payments-api-7f9c6d4b-xkq2p", "kind/name"). These are
+# legitimately high-entropy and pervasive in diagnostics — masking them
+# destroys the output's value.
+_DNS_SHAPE = re.compile(r"^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(/[a-z0-9]([a-z0-9.-]*[a-z0-9])?)*$")
 
 
 def _effective_threshold(core: str, threshold: float) -> float:

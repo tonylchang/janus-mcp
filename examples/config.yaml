@@ -16,9 +16,13 @@ scope:
 read_only: false
 
 write_tools:
+  # Available: rollout_restart, scale_deployment, delete_pod, rollout_undo,
+  #            set_cronjob_suspend, trigger_cronjob, cordon_node
+  # (cordon_node additionally requires scope.allow_cluster_scoped)
   enabled: ["rollout_restart", "scale_deployment"]   # empty list = no write tools
   max_replicas: 20
   allow_scale_to_zero: false
+  allow_bare_pod_deletion: false    # delete_pod normally requires a controller owner
   approval_timeout_seconds: 120     # elicitation prompt timeout (in-client approval UI)
   oob_approval_ttl_seconds: 600     # lifetime of a pending `janus-mcp approve <id>` request
 

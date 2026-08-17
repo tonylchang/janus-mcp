@@ -1,0 +1,11 @@
+--- revision-13
++++ revision-14
+@@ -4,7 +4,7 @@
+ spec:
+   containers:
+   - name: payments-api
+-    image: registry.local/payments-api:2.4.0
++    image: registry.local/payments-api:2.4.1
+     env:
+     - name: DB_PASSWORD
+       value: '[REDACTED:env-value]'

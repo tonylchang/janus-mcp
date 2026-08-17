@@ -1,0 +1,2 @@
+NAME            STATUS                                 AGE
+billing-export  0 3 * * * (active, last run 5h5m ago)  40d

@@ -18,9 +18,12 @@ from janus_mcp.redaction import (
     dedupe_events,
     render_event_lines,
     render_pod_table,
+    render_resource_table,
+    render_usage_table,
     render_yaml,
     sanitize_object,
     scrub_text,
+    unified_yaml_diff,
 )
 
 GOLDENS = Path(__file__).parent / "goldens"
@@ -53,15 +56,61 @@ def pipeline_logs() -> str:
     return scrub_text(str(support.load_fixture("pod.log")), RS, stats)
 
 
+def pipeline_list(kind: str, fixture: str) -> str:
+    stats = RedactionStats()
+    objs = support.load_fixture(fixture)
+    if not isinstance(objs, list):
+        objs = [objs]
+    sanitized = [sanitize_object(kind, o, RS, stats) for o in objs]
+    return scrub_text(render_resource_table(kind, sanitized, now=NOW), RS, stats)
+
+
+def pipeline_usage() -> str:
+    stats = RedactionStats()
+    table = render_usage_table(
+        support.load_fixture("pod_metrics.json"), support.load_fixture("pods.json")
+    )
+    return scrub_text(table, RS, stats)
+
+
+def pipeline_rollout_diff() -> str:
+    """The template diff shown by get_rollout_status / on rollout_undo approval
+    cards: both sides sanitized BEFORE diffing, then scrubbed."""
+    stats = RedactionStats()
+    current, previous = support.load_fixture("replicasets.json")
+
+    def sanitized_template(rs: dict) -> dict:
+        template = dict(rs["spec"]["template"])
+        meta = dict(template.get("metadata") or {})
+        meta["labels"] = {
+            k: v for k, v in (meta.get("labels") or {}).items() if k != "pod-template-hash"
+        }
+        template["metadata"] = meta
+        shell = {"kind": "ReplicaSet", "spec": {"template": template}}
+        out = sanitize_object("ReplicaSet", shell, RS, stats)
+        return out["spec"]["template"]
+
+    diff = unified_yaml_diff(
+        sanitized_template(previous), sanitized_template(current), "revision-13", "revision-14"
+    )
+    return scrub_text(diff, RS, stats)
+
+
 CASES = {
     "describe_pod.txt": lambda: pipeline_describe("Pod", "pod.json"),
     "describe_deployment.txt": lambda: pipeline_describe("Deployment", "deployment.json"),
     "describe_configmap.txt": lambda: pipeline_describe("ConfigMap", "configmap.json"),
     "describe_service.txt": lambda: pipeline_describe("Service", "service.json"),
     "describe_node.txt": lambda: pipeline_describe("Node", "node.json"),
+    "describe_cronjob.txt": lambda: pipeline_describe("CronJob", "cronjob.json"),
     "get_pods.txt": pipeline_pods,
     "get_events.txt": pipeline_events,
     "get_logs.txt": pipeline_logs,
+    "list_resources_deployments.txt": lambda: pipeline_list("Deployment", "deployment.json"),
+    "list_resources_cronjobs.txt": lambda: pipeline_list("CronJob", "cronjob.json"),
+    "list_resources_replicasets.txt": lambda: pipeline_list("ReplicaSet", "replicasets.json"),
+    "resource_usage.txt": pipeline_usage,
+    "rollout_diff.txt": pipeline_rollout_diff,
 }
 
 
