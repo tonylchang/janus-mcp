@@ -4,6 +4,17 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
+## [Unreleased]
+
+### Added
+
+- Container image on GHCR (`ghcr.io/tonylchang/janus-mcp`), published by the
+  release workflow for linux/amd64 + arm64. Base images digest-pinned,
+  dependencies installed hash-verified from `uv.lock`, non-root user, CLI as
+  the entrypoint. CI builds the image on every push so packaging can't rot;
+  the quickstart documents the mount layout (kubeconfig/config read-only,
+  state read-write for the audit log and out-of-band approvals).
+
 ## [0.3.1] — 2026-08-17
 
 ### Security fixes

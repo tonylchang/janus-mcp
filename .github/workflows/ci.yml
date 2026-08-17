@@ -43,6 +43,15 @@ jobs:
           scan-args: |-
             --lockfile=uv.lock
 
+  # The Dockerfile must keep building (single-arch, no push) so release day
+  # never discovers packaging rot.
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t janus-mcp:ci .
+      - run: docker run --rm janus-mcp:ci --help
+
   # Full-history secret scan. The planted test canaries are allowlisted in
   # .gitleaks.toml; anything else that looks like a credential fails the build.
   gitleaks:

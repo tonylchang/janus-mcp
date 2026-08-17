@@ -52,7 +52,7 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 
 ## Roadmap
 
-- Homebrew / container distribution (PyPI: [`janus-mcp-server`](https://pypi.org/project/janus-mcp-server/) ✓)
+- Homebrew distribution (PyPI: [`janus-mcp-server`](https://pypi.org/project/janus-mcp-server/) ✓ · container: `ghcr.io/tonylchang/janus-mcp` ✓)
 - Streamable HTTP sidecar mode (bearer token + Origin validation)
 
 ## Quick start
@@ -67,6 +67,15 @@ $EDITOR ~/.config/janus-mcp/config.yaml   # set your kubeconfig context + namesp
 
 # register with Claude Code:
 claude mcp add kubernetes -- janus-mcp serve
+```
+
+No Python toolchain? The same server ships as a container image:
+
+```bash
+claude mcp add kubernetes -- docker run -i --rm \
+  -v ~/.kube/config:/home/janus/.kube/config:ro \
+  -v ~/.config/janus-mcp:/home/janus/.config/janus-mcp:ro \
+  ghcr.io/tonylchang/janus-mcp:latest
 ```
 
 Registration recipes for Claude Desktop, VS Code/Copilot, Codex CLI, and Cursor

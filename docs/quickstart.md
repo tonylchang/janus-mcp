@@ -19,6 +19,28 @@ This gives you the `janus-mcp` CLI. One-shot alternative without installing:
 `uvx janus-mcp-server serve` (every `janus-mcp serve` below becomes
 `uvx janus-mcp-server serve`).
 
+**Container image** (no Python toolchain needed):
+
+```bash
+docker pull ghcr.io/tonylchang/janus-mcp:latest
+```
+
+Every `janus-mcp …` below becomes:
+
+```bash
+docker run -i --rm \
+  -v ~/.kube/config:/home/janus/.kube/config:ro \
+  -v ~/.config/janus-mcp:/home/janus/.config/janus-mcp:ro \
+  -v ~/.local/state/janus-mcp:/home/janus/.local/state/janus-mcp \
+  ghcr.io/tonylchang/janus-mcp:latest …
+```
+
+The kubeconfig and config mount read-only; the state mount is read-write and
+shared so the audit log lands on the host and `janus-mcp approve <id>` (run on
+the host or in a second container with the same mount) can approve writes
+requested by the serving container. Pin a digest
+(`ghcr.io/tonylchang/janus-mcp@sha256:…`) for reproducible deployments.
+
 **From source** (for contributors):
 
 ```bash
