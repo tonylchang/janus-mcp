@@ -4,12 +4,14 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
-## [Unreleased]
+## [0.3.1] — 2026-08-17
 
 ### Security fixes
 
 A second adversarial review pass (same process that produced the 0.2.0
-fixes) over the whole package, including the 0.3.0 surface:
+fixes) over the whole package, including the 0.3.0 surface. Upgrading is
+strongly recommended — the redaction fixes cover common real-world leak
+shapes (env-dump credentials, ELB hostnames, node names in event text):
 
 - **Env-style credential keys leaked** (`POSTGRES_PASSWORD=`, `DB_SECRET:`,
   `spring.datasource.password=`): the key-value scrubber's word-boundary
