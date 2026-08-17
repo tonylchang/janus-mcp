@@ -31,7 +31,7 @@ dependencies = [
     "pydantic-settings>=2.4,<3",
     "cachetools>=5.3,<7",
     "PyYAML>=6.0,<7",
-    "structlog>=24,<26",
+    "structlog>=24,<27",
 ]
 
 [project.urls]
