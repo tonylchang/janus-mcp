@@ -1,0 +1,72 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.tonylchang/janus-mcp",
+  "title": "Janus",
+  "description": "Secure Kubernetes MCP server: scoped, redacted diagnostics and human-approved writes — credentials never reach the model",
+  "version": "0.4.1",
+  "websiteUrl": "https://janus-mcp.ns47.com",
+  "repository": {
+    "url": "https://github.com/tonylchang/janus-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "janus-mcp-server",
+      "version": "0.4.1",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      }
+    },
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/tonylchang/janus-mcp:0.4.1",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeArguments": [
+        {
+          "type": "positional",
+          "value": "-i",
+          "description": "Interactive: stdio is the MCP transport"
+        },
+        {
+          "type": "positional",
+          "value": "--rm",
+          "description": "Remove the container on exit"
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "{kubeconfig_path}:/home/janus/.kube/config:ro",
+          "isRequired": true,
+          "description": "Mount the kubeconfig read-only",
+          "variables": {
+            "kubeconfig_path": {
+              "description": "Path to the kubeconfig on the host",
+              "format": "filepath",
+              "isRequired": true,
+              "default": "~/.kube/config"
+            }
+          }
+        },
+        {
+          "type": "named",
+          "name": "-v",
+          "value": "{config_dir}:/home/janus/.config/janus-mcp:ro",
+          "isRequired": true,
+          "description": "Mount the janus-mcp operator config read-only",
+          "variables": {
+            "config_dir": {
+              "description": "Directory containing config.yaml (pinned context, allowed namespaces)",
+              "format": "filepath",
+              "isRequired": true,
+              "default": "~/.config/janus-mcp"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

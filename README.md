@@ -12,6 +12,8 @@
   <a href="CHANGELOG.md">Changelog</a>
 </p>
 
+<!-- mcp-name: io.github.tonylchang/janus-mcp -->
+
 ---
 
 ## What is Janus?

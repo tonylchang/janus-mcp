@@ -1,9 +1,15 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.1] — 2026-08-17
 
 ### Added
 
+- Listed in the official [MCP Registry](https://registry.modelcontextprotocol.io)
+  as `io.github.tonylchang/janus-mcp` (`server.json` in the repo root; PyPI
+  and GHCR packages carry the registry's ownership markers).
+- `janus-mcp-server` console-script alias, so `uvx janus-mcp-server` works
+  without `--from` (generic MCP clients run the script named after the
+  package).
 - Homebrew tap: `brew install tonylchang/tap/janus-mcp`
   ([tonylchang/homebrew-tap](https://github.com/tonylchang/homebrew-tap)).
   The formula builds from the PyPI sdist with every Python dependency pinned

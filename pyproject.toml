@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "janus-mcp-server"
-version = "0.4.0"
+version = "0.4.1"
 description = "Secure Kubernetes MCP server: redacted diagnostics and human-approved writes, credentials never leave the process."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -43,6 +43,9 @@ Changelog = "https://github.com/tonylchang/janus-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 janus-mcp = "janus_mcp.cli:main"
+# Alias matching the PyPI package name so `uvx janus-mcp-server` just works
+# (generic MCP clients run the script named after the package).
+janus-mcp-server = "janus_mcp.cli:main"
 
 [dependency-groups]
 dev = [
