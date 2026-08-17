@@ -25,7 +25,7 @@ RUN uv export --frozen --no-dev --no-emit-project --format requirements-txt \
         -o /requirements.txt \
     && uv build --wheel -o /dist
 
-FROM python@sha256:00faa2debb87529f9f0764e9491d8ba400a3678976616c3bd7cb193745ac20d1
+FROM python@sha256:4fad23465a06cc5149a541fbec6f87e234a64dc0550f6bfdd2d290d8f03240df
 # python:3.13-slim-bookworm
 LABEL io.modelcontextprotocol.server.name="io.github.tonylchang/janus-mcp" \
       org.opencontainers.image.source="https://github.com/tonylchang/janus-mcp" \
