@@ -4,7 +4,14 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
-## [Unreleased]
+## [0.3.0] — 2026-08-17
+
+A capability release: the read surface grows from "pods and known names" to
+full namespace discovery, live resource usage, and rollout history with
+sanitized diffs; the write surface grows from 2 to 7 approval-gated tools.
+Every new write is bound to the state the approver saw (UID or
+resourceVersion), registered only when explicitly enabled, and covered by
+the frame-capture leak test.
 
 ### Added
 
