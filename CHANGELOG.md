@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Homebrew tap: `brew install tonylchang/tap/janus-mcp`
+  ([tonylchang/homebrew-tap](https://github.com/tonylchang/homebrew-tap)).
+  The formula builds from the PyPI sdist with every Python dependency pinned
+  to the release's `uv.lock` versions; the tap's CI builds from source and
+  runs `brew test` on macOS and Linux.
+
 All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).

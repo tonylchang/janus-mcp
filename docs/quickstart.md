@@ -13,6 +13,8 @@ credentials never leaving your machine.
 
 ```bash
 uv tool install janus-mcp-server     # or: pipx install janus-mcp-server
+# or via Homebrew:
+brew install tonylchang/tap/janus-mcp
 ```
 
 This gives you the `janus-mcp` CLI. One-shot alternative without installing:

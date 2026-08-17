@@ -52,13 +52,14 @@ Self‑hosting a model helps, but not everyone can or wants to run frontier‑gr
 
 ## Roadmap
 
-- Homebrew distribution (PyPI: [`janus-mcp-server`](https://pypi.org/project/janus-mcp-server/) ✓ · container: `ghcr.io/tonylchang/janus-mcp` ✓)
+- Distribution ✓ — PyPI [`janus-mcp-server`](https://pypi.org/project/janus-mcp-server/) · container `ghcr.io/tonylchang/janus-mcp` · Homebrew `tonylchang/tap/janus-mcp`
 - Streamable HTTP sidecar mode (bearer token + Origin validation)
 
 ## Quick start
 
 ```bash
 uv tool install janus-mcp-server   # or: pipx install janus-mcp-server
+#     brew install tonylchang/tap/janus-mcp
 
 mkdir -p ~/.config/janus-mcp
 curl -fsSL https://raw.githubusercontent.com/tonylchang/janus-mcp/main/examples/config.yaml \
