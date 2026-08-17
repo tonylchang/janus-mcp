@@ -126,9 +126,8 @@ async def test_delete_pod_approved_binds_uid(tmp_path) -> None:
     # the card told the human what controls the pod
     assert "ReplicaSet/payments-api-7f9c6d4b" in cards[0]
     # the delete carried the UID observed at approval time
-    assert kube.deleted_pods == [
-        ("prod", "payments-api-7f9c6d4b-xkq2p", "4f6a2b1c-9d8e-4c3b-a2f1-0e9d8c7b6a5f")
-    ]
+    fixture_uid = support.load_fixture("pod.json")["metadata"]["uid"]
+    assert kube.deleted_pods == [("prod", "payments-api-7f9c6d4b-xkq2p", fixture_uid)]
 
 
 async def test_delete_pod_replaced_instance_conflicts(tmp_path) -> None:
