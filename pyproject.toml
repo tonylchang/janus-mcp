@@ -26,7 +26,7 @@ dependencies = [
     # 1.x only: 2.0 is a rewrite (FastMCP/Context/elicitation all change) — see
     # the v2-migration issue. Floor 1.28.1 carries the fix for GHSA-vj7q-gjh5-988w.
     "mcp>=1.28.1,<2",
-    "kubernetes>=31,<34",
+    "kubernetes>=31,<37",
     "pydantic>=2.8,<3",
     "pydantic-settings>=2.4,<3",
     "cachetools>=5.3,<7",
