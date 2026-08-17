@@ -4,7 +4,7 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
-## [Unreleased]
+## [0.4.0] — 2026-08-17
 
 ### Added
 
