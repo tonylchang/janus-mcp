@@ -289,6 +289,87 @@ async def test_trigger_cronjob_creates_named_job(tmp_path) -> None:
     assert calls[0]["job_name"].startswith("billing-export-manual-")
 
 
+async def test_trigger_cronjob_template_change_refused(tmp_path) -> None:
+    """The Job must be built from the template the human approved. If the
+    CronJob's jobTemplate changes between the approval card and execution,
+    the trigger must refuse instead of running the new workload."""
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    real_get_object = kube.get_object
+    reads = {"n": 0}
+
+    async def mutating_get_object(kind, name, namespace):
+        obj = await real_get_object(kind, name, namespace)
+        if kind == "CronJob":
+            reads["n"] += 1
+            if reads["n"] >= 2:  # the post-approval verification read
+                obj = dict(obj)
+                obj["spec"] = dict(obj["spec"])
+                obj["spec"]["jobTemplate"] = {
+                    "spec": {
+                        "template": {
+                            "spec": {
+                                "containers": [
+                                    {"name": "evil", "image": "attacker.example/miner:1"}
+                                ]
+                            }
+                        }
+                    }
+                }
+        return obj
+
+    kube.get_object = mutating_get_object  # type: ignore[method-assign]
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server, elicitation_callback=_accept_recorder([])) as client:
+        result = await client.call_tool(
+            "trigger_cronjob",
+            {"name": "billing-export", "namespace": "prod", "reason": "rerun"},
+        )
+    assert result.isError
+    assert "changed since approval" in result.content[0].text
+    assert kube.calls_for("create_job_from_cronjob") == []
+
+
+async def test_rollout_undo_target_change_refused_oob(tmp_path) -> None:
+    """OOB flow: if the rollback target template changes while the approval
+    waits, the retry must refuse — even when revision numbers still line up."""
+    from janus_mcp.policy import ApprovalStore
+
+    settings = make_settings(tmp_path)
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    store = ApprovalStore(settings.approvals_dir, ttl_seconds=300)
+
+    async with connect(server) as client:  # no elicitation -> OOB
+        first = await client.call_tool(
+            "rollout_undo",
+            {"name": "payments-api", "namespace": "prod", "reason": "revert bad build"},
+        )
+        approval_id = first.content[0].text.split("approval_id=")[1].split()[0]
+
+        # a new rollout lands while the approval waits: the 'previous' RS
+        # now holds a different template (same revision numbering)
+        real_list = kube.list_replica_sets
+
+        async def shifted_list(namespace, label_selector):
+            replica_sets = await real_list(namespace, label_selector)
+            replica_sets[1]["spec"]["template"]["spec"]["containers"][0]["image"] = (
+                "registry.local/payments-api:2.3.9"
+            )
+            return replica_sets
+
+        kube.list_replica_sets = shifted_list  # type: ignore[method-assign]
+        store.approve(approval_id)
+
+        result = await client.call_tool(
+            "rollout_undo",
+            {"name": "payments-api", "namespace": "prod", "reason": "revert bad build"},
+        )
+        assert result.isError
+        assert "changed since approval" in result.content[0].text
+        assert kube.calls_for("patch_deployment_template") == []
+
+
 # ---- cordon_node -------------------------------------------------------------
 
 

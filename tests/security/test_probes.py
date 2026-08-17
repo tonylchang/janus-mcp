@@ -132,6 +132,46 @@ async def test_rate_limit_denial_is_audited(tmp_path) -> None:
     )
 
 
+async def test_namespace_label_selector_is_actually_applied(server, fake_kube) -> None:
+    """The schema advertises label filtering — it must really happen."""
+    result = await _call(server, "list_namespaces", {"label_selector": "team=payments"})
+    assert not result.isError
+    text = result.content[0].text
+    assert "prod" in text  # fixture: prod carries team=payments
+    assert "staging" not in text  # staging does not
+    assert fake_kube.calls_for("list_namespaces")[0]["label_selector"] == "team=payments"
+
+
+async def test_log_tail_clamped_to_operator_cap(tmp_path) -> None:
+    """Lowering log_tail_max must not break default calls — requests clamp to
+    the operator's cap instead of erroring."""
+    settings = make_settings(tmp_path, limits={"log_tail_max": 20})
+    kube = FakeKube()
+    server = build_server(settings, kube, make_audit(settings))
+    async with connect(server) as client:
+        result = await client.call_tool(
+            "get_logs",
+            {"namespace": "prod", "pod": "payments-api-7f9c6d4b-xkq2p", "previous": True},
+        )
+    assert not result.isError, result.content[0].text
+    assert kube.calls_for("read_pod_log")[0]["tail_lines"] == 20
+
+
+async def test_policy_refusals_are_audited(server, fake_kube, settings) -> None:
+    """The Secret-kind refusal and write-gate policy refusals land in the audit
+    log as 'refused' events, same as scope and rate-limit denials."""
+    await _call(
+        server,
+        "describe_resource",
+        {"kind": "Secret", "name": "db-credentials", "namespace": "prod"},
+    )
+    events = _audit_events(settings)
+    assert any(
+        e["event"] == "refused" and e["tool"] == "describe_resource" and e["reason"] == "policy"
+        for e in events
+    )
+
+
 async def test_cached_summary_reads_are_audited(server, settings) -> None:
     """Cache hits are still reads the model performed — each must be recorded."""
     async with connect(server) as client:

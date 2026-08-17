@@ -63,6 +63,36 @@ def test_audit_records_are_json_lines(tmp_path) -> None:
     assert second["event"] == "write_denied"
 
 
+def test_cli_top_level_config_flag_is_honored(tmp_path, capsys) -> None:
+    """`janus-mcp --config X <cmd>` must load X — the subparser's own --config
+    default used to silently clobber it back to None (and thus the default
+    config path), starting the server with the wrong security policy."""
+    import yaml as yaml_mod
+
+    from janus_mcp.cli import main
+    from janus_mcp.policy import ApprovalStore
+
+    approvals_dir = tmp_path / "approvals"
+    config = {
+        "context": "cli-test-ctx",
+        "scope": {"allowed_namespaces": ["prod"]},
+        "audit_log": str(tmp_path / "audit.jsonl"),
+        "approvals_dir": str(approvals_dir),
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(yaml_mod.safe_dump(config))
+    approval_id = ApprovalStore(approvals_dir, ttl_seconds=300).create(
+        "scale_deployment", {"name": "x"}, "Scale x"
+    )
+
+    # flag BEFORE the subcommand — the historically broken position
+    assert main(["--config", str(config_path), "approvals"]) == 0
+    assert approval_id in capsys.readouterr().out
+    # flag after the subcommand keeps working too
+    assert main(["approvals", "--config", str(config_path)]) == 0
+    assert approval_id in capsys.readouterr().out
+
+
 def test_audit_rotation(tmp_path) -> None:
     path = tmp_path / "audit.jsonl"
     audit = AuditLog(path, max_bytes=512, backups=2)

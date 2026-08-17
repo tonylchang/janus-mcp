@@ -74,6 +74,10 @@ domain (stdio transport, no network listener, no multi-tenant auth).
   key=value shapes). Tune `redaction.entropy_threshold`; never disable the pass.
 - Namespace and resource *names* in scope are visible to the model by design;
   if names themselves are sensitive, scope them out.
+- `mask_node_names` covers every structural field plus provider-shaped node
+  names (EC2/EKS `ip-…`, GKE `gke-…`, AKS `aks-…`) in free text such as event
+  messages and logs. Custom node-naming schemes in free text cannot be
+  recognized reliably and may leak there.
 - A hostile workload can still spam misleading diagnostics (prompt injection);
   the payoff is capped at a human-read approval card, but human attention is
   the last line of defense — read the card.

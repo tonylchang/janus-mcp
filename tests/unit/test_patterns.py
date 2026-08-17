@@ -44,6 +44,22 @@ def scrub(text: str, rs: RedactionSettings = RS) -> str:
         ("password=Tr0ub4dor&3-canary", "password=[REDACTED]", "Tr0ub4dor"),
         ("api_key: sk-aaaa1111bbbb2222", "api_key: [REDACTED]", "sk-aaaa1111bbbb2222"),
         ("Authorization: Bearer abcdef123456789", "[REDACTED]", "abcdef123456789"),
+        # env-dump style: the keyword is a SUFFIX of the key — the single most
+        # common real-world leak shape in pod logs
+        ("POSTGRES_PASSWORD=hunter2", "POSTGRES_PASSWORD=[REDACTED]", "hunter2"),
+        ("MYAPP_TOKEN: tk-9f8e7d6c", "MYAPP_TOKEN: [REDACTED]", "tk-9f8e7d6c"),
+        (
+            "spring.datasource.password=pg123secret",
+            "spring.datasource.password=[REDACTED]",
+            "pg123secret",
+        ),
+        # quoted values with spaces must be redacted in full, not to the first space
+        (
+            'admin password: "correct horse battery staple" set',
+            "password: [REDACTED]",
+            "correct horse",
+        ),
+        ("DB_SECRET='multi word secret here'", "DB_SECRET=[REDACTED]", "multi word"),
     ],
 )
 def test_pattern_redacts(text: str, token: str, gone: str) -> None:
@@ -101,7 +117,6 @@ def test_unrecognized_key_random_value_masks_value_only() -> None:
     [
         # DNS-1123-shaped: every generated Kubernetes name looks high-entropy
         "replicaset payments-api-7f9c6d4b has 3 replicas",
-        "node ip-10-1-2-3.us-west-2.compute.internal cordoned",
         # slash-joined forms our own tool output uses
         "deleted pod prod/payments-api-7f9c6d4b-xkq2p successfully",
         "created job billing-export-manual-20260817041500 in prod",
@@ -113,6 +128,36 @@ def test_unrecognized_key_random_value_masks_value_only() -> None:
 )
 def test_entropy_negative_cases_survive(text: str) -> None:
     assert scrub(text) == text
+
+
+# ---- node names in free text -------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "gone"),
+    [
+        (
+            "Successfully assigned prod/payments-api-7f9c6d4b-xkq2p "
+            "to ip-10-1-2-3.us-west-2.compute.internal",
+            "ip-10-1-2-3",
+        ),
+        ("kubelet on worker-3.ec2.internal reported OOM", "worker-3.ec2.internal"),
+        ("gke-prod-default-pool-1a2b3c4d-x9yz became NotReady", "gke-prod-default-pool"),
+        ("drained aks-nodepool1-12345678-vmss000002", "aks-nodepool1"),
+    ],
+)
+def test_node_names_masked_in_free_text(text: str, gone: str) -> None:
+    """mask_node_names covers scheduler/kubelet event text and logs, not just
+    structural fields — the same names must not leak through free text."""
+    out = scrub(text)
+    assert gone not in out
+    assert "[MASKED:node]" in out
+
+
+def test_node_names_kept_in_text_when_masking_disabled() -> None:
+    rs = RedactionSettings(mask_node_names=False)
+    text = "node ip-10-1-2-3.us-west-2.compute.internal cordoned"
+    assert scrub(text, rs) == text
 
 
 def test_public_ip_masked_by_default() -> None:
@@ -194,6 +239,19 @@ def test_key_value_keeps_key_name() -> None:
     out = scrub("password=hunter2")
     assert out.startswith("password=")
     assert "hunter2" not in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # keyword must sit immediately before the separator, not mid-identifier
+        "tokenizer=fast mode enabled",
+        "authors=smith reviewed the change",
+        "secrets_manager_region=us-east-1",  # keyword 'secret' not adjacent to '='
+    ],
+)
+def test_keyword_lookalike_keys_survive(text: str) -> None:
+    assert scrub(text) == text
 
 
 def test_newlines_preserved() -> None:

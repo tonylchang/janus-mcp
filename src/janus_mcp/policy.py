@@ -185,7 +185,14 @@ class ApprovalStore:
             if record.get("tool") == tool and record.get("args_hash") == wanted:
                 state = record.get("state") or {}
                 if record.get("approved"):
-                    self._path(record["id"]).unlink(missing_ok=True)  # burn on use
+                    # Burn-on-use must be atomic: unlink() succeeds for exactly
+                    # one caller, so a concurrent duplicate call (or a second
+                    # server process on the same approvals dir) loses the race
+                    # and gets no authorization instead of a silent second run.
+                    try:
+                        self._path(record["id"]).unlink()
+                    except FileNotFoundError:
+                        continue  # someone else burned it first
                     return "approved", record["id"], state
                 return "pending", record["id"], state
         return "none", None, {}

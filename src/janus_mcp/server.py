@@ -14,6 +14,8 @@ URL).
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, Literal
 
@@ -169,6 +171,19 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             audit.log_refused(tool, "rate_limit")
             raise
 
+    def _check_enabled(tool: str) -> None:
+        try:
+            gate.check_enabled(tool)
+        except ToolError as exc:
+            audit.log_refused(tool, "policy", detail=str(exc))
+            raise
+
+    def _hash_obj(obj: Any) -> str:
+        """Canonical content hash used to bind an approval to the exact object
+        state (e.g. a CronJob's jobTemplate) the human saw."""
+        canonical = json.dumps(obj, sort_keys=True, separators=(",", ":"), default=str)
+        return hashlib.sha256(canonical.encode()).hexdigest()
+
     def _shape(tool: str, render: Any, stats: RedactionStats, **fields: Any) -> str:
         """Render + scrub + envelope, failing closed on any redaction error."""
         try:
@@ -196,18 +211,26 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         _acquire("list_namespaces")
         stats = RedactionStats()
         in_scope = set(scope.namespaces())
+        selector_note = ""
         try:
-            all_ns = await _fetch(kube.list_namespaces())
+            all_ns = await _fetch(kube.list_namespaces(label_selector))
             namespaces = [ns for ns in all_ns if ns.get("metadata", {}).get("name") in in_scope]
         except ToolError:
             # RBAC may deny cluster-wide namespace listing; fall back to fetching
-            # each allowlisted namespace individually (label_selector not applied).
+            # each allowlisted namespace individually. The selector cannot be
+            # applied on this path — say so rather than pretending it was.
             namespaces = []
             for name in sorted(in_scope):
                 try:
                     namespaces.append(await _fetch(kube.get_namespace(name)))
                 except ToolError:
                     continue
+            if label_selector:
+                selector_note = (
+                    "\nnote: label_selector was NOT applied "
+                    "(namespace-list RBAC denied; per-namespace fallback in use)"
+                )
+        namespaces = [sanitize_object("Namespace", ns, redaction, stats) for ns in namespaces]
 
         def render() -> str:
             rows = [["NAME", "STATUS", "AGE"]]
@@ -220,7 +243,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                         _age(meta.get("creationTimestamp")),
                     ]
                 )
-            return _table(rows)
+            return _table(rows) + selector_note
 
         result = _shape("list_namespaces", render, stats, items=len(namespaces))
         audit.log_call("list_namespaces", items=len(namespaces), redactions=stats.total)
@@ -321,7 +344,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         """Detailed, sanitized view of a single resource plus its 10 most recent related
         events. Secrets are not retrievable by this assistant, by design."""
         if kind in BLOCKED_KINDS:
-            audit.log_call("describe_resource", kind=kind, outcome="policy_refused")
+            audit.log_refused("describe_resource", "policy", kind=kind)
             raise ToolError(
                 "Secret and other credential-bearing kinds are not retrievable by design; "
                 "reference names like secretKeyRef(...) are visible in describe output instead"
@@ -380,7 +403,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         pod: str,
         namespace: str,
         container: str | None = None,
-        tail_lines: Annotated[int, Field(ge=1, le=500)] = 100,
+        tail_lines: Annotated[int, Field(ge=1, le=5000)] = 100,
         since_minutes: Annotated[int | None, Field(ge=1, le=1440)] = None,
         previous: Annotated[
             bool, Field(description="Logs of the prior, crashed container instance")
@@ -394,7 +417,11 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         validate_name(namespace, "namespace")
         if container is not None:
             validate_name(container, "container")
-        tail = validate_bounds(tail_lines, 1, limits.log_tail_max, "tail_lines")
+        # Clamp to the operator's cap instead of erroring: log_tail_max is
+        # policy, and the default request must keep working when it is lowered.
+        tail = validate_bounds(
+            min(tail_lines, limits.log_tail_max), 1, limits.log_tail_max, "tail_lines"
+        )
         if since_minutes is not None:
             validate_bounds(since_minutes, 1, 1440, "since_minutes")
         grep = validate_grep(grep)
@@ -484,8 +511,21 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
         _check_namespace("get_resource_usage", namespace)
         _acquire("get_resource_usage")
         stats = RedactionStats()
-        metrics = await _fetch(kube.list_pod_metrics(namespace))
-        pods = await _fetch(kube.list_pods(namespace, None, None, 200))
+        raw_metrics = await _fetch(kube.list_pod_metrics(namespace))
+        raw_pods = await _fetch(kube.list_pods(namespace, None, None, 200))
+        # Everything model-visible passes Layer 1: pods through the Pod rules,
+        # metrics as an explicit projection to name + usage quantities (the
+        # metrics objects have no per-kind rules, so nothing else may ride in).
+        pods = [sanitize_object("Pod", p, redaction, stats) for p in raw_pods]
+        metrics = [
+            {
+                "metadata": {"name": (m.get("metadata") or {}).get("name", "?")},
+                "containers": [
+                    {"usage": dict(c.get("usage") or {})} for c in m.get("containers") or []
+                ],
+            }
+            for m in raw_metrics
+        ]
 
         def render() -> str:
             body = render_usage_table(metrics, pods)
@@ -838,7 +878,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
             _check_namespace("rollout_restart", namespace)
-            gate.check_enabled("rollout_restart")
+            _check_enabled("rollout_restart")
             _acquire("rollout_restart")
             stats = RedactionStats()
 
@@ -853,15 +893,20 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 f"last restartedAt: "
                 f"{template_annotations.get('kubectl.kubernetes.io/restartedAt', 'never')}"
             )
+            rv = str((live.get("metadata") or {}).get("resourceVersion") or "")
+            if not rv:
+                raise ToolError("resourceVersion unavailable; refusing to request the write")
             args = {"kind": kind, "name": name, "namespace": namespace, "reason": reason}
             action = f"Rolling restart: {kind} {namespace}/{name} (reason: {reason})"
-            approved, message, _ = await _resolve_approval(
-                ctx, "rollout_restart", args, action, live_state
+            approved, message, approved_state = await _resolve_approval(
+                ctx, "rollout_restart", args, action, live_state, state={"resource_version": rv}
             )
             if not approved:
                 return message or "request not approved"
 
-            result = await _fetch(kube.rollout_restart(kind, name, namespace, reason))
+            stored_rv = (approved_state or {}).get("resource_version")
+            expected_rv = stored_rv if stored_rv else rv
+            result = await _fetch(kube.rollout_restart(kind, name, namespace, reason, expected_rv))
             audit.log_executed("rollout_restart", **args)
             summary_cache.clear()
             new_status = result.get("status") or {}
@@ -887,12 +932,14 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(name, "name")
             validate_name(namespace, "namespace")
             _check_namespace("scale_deployment", namespace)
-            gate.check_enabled("scale_deployment")
+            _check_enabled("scale_deployment")
             gate.check_replica_bounds(replicas)  # refused before approval is requested
             _acquire("scale_deployment")
             stats = RedactionStats()
 
             current = await _fetch(kube.get_scale(kind, name, namespace))  # fresh read
+            if not current.resource_version:
+                raise ToolError("resourceVersion unavailable; refusing to request the write")
             # The Scale subresource has no readiness; read the object itself so
             # the human approver sees real health, not a fabricated "N/N ready".
             live = await _fetch(kube.get_object(kind, name, namespace))
@@ -940,7 +987,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
             _check_namespace("delete_pod", namespace)
-            gate.check_enabled("delete_pod")
+            _check_enabled("delete_pod")
             _acquire("delete_pod")
             stats = RedactionStats()
 
@@ -1002,7 +1049,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
             _check_namespace("rollout_undo", namespace)
-            gate.check_enabled("rollout_undo")
+            _check_enabled("rollout_undo")
             _acquire("rollout_undo")
             stats = RedactionStats()
 
@@ -1014,6 +1061,12 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             current, previous = owned[0], owned[1]
             current_rev, target_rev = _rs_revision(current), _rs_revision(previous)
             rv = str((dep.get("metadata") or {}).get("resourceVersion") or "")
+            if not rv:
+                raise ToolError("resourceVersion unavailable; refusing to request the write")
+            # Bind the approval to the exact template being rolled back to —
+            # revision numbers alone are forgeable/ambiguous (unannotated
+            # ReplicaSets all report revision 0).
+            target_hash = _hash_obj(_template_of(previous))
             status = dep.get("status") or {}
             diff = scrub_text(
                 unified_yaml_diff(
@@ -1053,17 +1106,26 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 args,
                 action,
                 live_state,
-                state={"resource_version": rv, "to_revision": target_rev},
+                state={
+                    "resource_version": rv,
+                    "to_revision": target_rev,
+                    "template_hash": target_hash,
+                },
             )
             if not approved:
                 return message or "request not approved"
 
-            approved_rev = (approved_state or {}).get("to_revision") or target_rev
-            if approved_rev != target_rev:
-                raise ToolError(
-                    "the rollback target changed since approval; re-request and re-approve"
-                )
-            expected_rv = (approved_state or {}).get("resource_version") or rv
+            approved_state = approved_state or {}
+            # None-safe comparisons: a stored revision of 0 or an empty hash
+            # must fail the guard, never silently fall back to the fresh value.
+            for key, fresh in (("to_revision", target_rev), ("template_hash", target_hash)):
+                stored = approved_state.get(key)
+                if stored is not None and stored != fresh:
+                    raise ToolError(
+                        "the rollback target changed since approval; re-request and re-approve"
+                    )
+            stored_rv = approved_state.get("resource_version")
+            expected_rv = stored_rv if stored_rv else rv
             # Raw previous template flows kube-layer -> kube-layer, never
             # through the model; only the sanitized diff was model/human-visible.
             result = await _fetch(
@@ -1097,7 +1159,7 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
             _check_namespace("set_cronjob_suspend", namespace)
-            gate.check_enabled("set_cronjob_suspend")
+            _check_enabled("set_cronjob_suspend")
             _acquire("set_cronjob_suspend")
             stats = RedactionStats()
 
@@ -1105,12 +1167,17 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             spec = cronjob.get("spec") or {}
             currently_suspended = bool(spec.get("suspend"))
             if currently_suspended == suspend:
+                audit.log_call(
+                    "set_cronjob_suspend", namespace=namespace, name=name, outcome="noop"
+                )
                 body = (
                     f"CronJob {namespace}/{name} is already "
                     f"{'suspended' if suspend else 'active'}; no change needed"
                 )
                 return _shape("set_cronjob_suspend", body, stats, ns=namespace, name=name)
             rv = str((cronjob.get("metadata") or {}).get("resourceVersion") or "")
+            if not rv:
+                raise ToolError("resourceVersion unavailable; refusing to request the write")
             last_run = (cronjob.get("status") or {}).get("lastScheduleTime", "never")
             verb = "Suspend" if suspend else "Resume"
             args = {
@@ -1135,7 +1202,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             if not approved:
                 return message or "request not approved"
 
-            expected_rv = (approved_state or {}).get("resource_version") or rv
+            stored_rv = (approved_state or {}).get("resource_version")
+            expected_rv = stored_rv if stored_rv else rv
             result = await _fetch(kube.set_cronjob_suspend(name, namespace, suspend, expected_rv))
             audit.log_executed("set_cronjob_suspend", **args)
             now_suspended = bool((result.get("spec") or {}).get("suspend"))
@@ -1157,18 +1225,22 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(namespace, "namespace")
             reason = validate_reason(reason)
             _check_namespace("trigger_cronjob", namespace)
-            gate.check_enabled("trigger_cronjob")
+            _check_enabled("trigger_cronjob")
             _acquire("trigger_cronjob")
             stats = RedactionStats()
 
             cronjob = await _fetch(kube.get_object("CronJob", name, namespace))
             spec = cronjob.get("spec") or {}
-            template_spec = (
-                ((spec.get("jobTemplate") or {}).get("spec") or {}).get("template") or {}
-            ).get("spec") or {}
+            job_template = spec.get("jobTemplate") or {}
+            template_spec = ((job_template.get("spec") or {}).get("template") or {}).get(
+                "spec"
+            ) or {}
             images = ",".join(
                 str(c.get("image", "?")) for c in template_spec.get("containers") or []
             )
+            # The approval must refer to THIS template, not whatever the
+            # CronJob holds at execution time.
+            template_hash = _hash_obj(job_template)
             args = {"name": name, "namespace": namespace, "reason": reason}
             action = f"Trigger CronJob {namespace}/{name} now (images: {images}; reason: {reason})"
             live_state = (
@@ -1176,15 +1248,31 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 f"{'SUSPENDED' if spec.get('suspend') else 'active'}, last run "
                 f"{(cronjob.get('status') or {}).get('lastScheduleTime', 'never')}"
             )
-            approved, message, _ = await _resolve_approval(
-                ctx, "trigger_cronjob", args, action, live_state
+            approved, message, approved_state = await _resolve_approval(
+                ctx,
+                "trigger_cronjob",
+                args,
+                action,
+                live_state,
+                state={"template_hash": template_hash},
             )
             if not approved:
                 return message or "request not approved"
 
+            # Re-read after approval (elicitation windows count too) and verify
+            # the template is byte-identical to what the human approved.
+            approved_hash = (approved_state or {}).get("template_hash") or template_hash
+            fresh = await _fetch(kube.get_object("CronJob", name, namespace))
+            fresh_template = (fresh.get("spec") or {}).get("jobTemplate") or {}
+            if _hash_obj(fresh_template) != approved_hash:
+                raise ToolError(
+                    "the CronJob's job template changed since approval; re-request and re-approve"
+                )
             timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
             job_name = f"{name[:40].rstrip('-')}-manual-{timestamp}"
-            result = await _fetch(kube.create_job_from_cronjob(name, namespace, job_name, reason))
+            result = await _fetch(
+                kube.create_job_from_cronjob(name, namespace, job_name, reason, fresh_template)
+            )
             audit.log_executed("trigger_cronjob", job=job_name, **args)
             created = (result.get("metadata") or {}).get("name", job_name)
             body = f"created Job {created} in {namespace} from CronJob {name}"
@@ -1204,13 +1292,14 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             validate_name(name, "name")
             reason = validate_reason(reason)
             _check_cluster_scoped("cordon_node")
-            gate.check_enabled("cordon_node")
+            _check_enabled("cordon_node")
             _acquire("cordon_node")
             stats = RedactionStats()
 
             node = await _fetch(kube.get_object("Node", name, None))
             currently = bool((node.get("spec") or {}).get("unschedulable"))
             if currently == unschedulable:
+                audit.log_call("cordon_node", name=name, outcome="noop")
                 body = (
                     f"node {name} is already "
                     f"{'cordoned' if unschedulable else 'schedulable'}; no change needed"
@@ -1225,6 +1314,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
                 "?",
             )
             rv = str((node.get("metadata") or {}).get("resourceVersion") or "")
+            if not rv:
+                raise ToolError("resourceVersion unavailable; refusing to request the write")
             verb = "Cordon" if unschedulable else "Uncordon"
             args = {"name": name, "unschedulable": unschedulable, "reason": reason}
             action = f"{verb} node {name} (reason: {reason})"
@@ -1235,7 +1326,8 @@ def build_server(settings: Settings, kube: KubeApi, audit: AuditLog) -> FastMCP:
             if not approved:
                 return message or "request not approved"
 
-            expected_rv = (approved_state or {}).get("resource_version") or rv
+            stored_rv = (approved_state or {}).get("resource_version")
+            expected_rv = stored_rv if stored_rv else rv
             result = await _fetch(kube.set_node_unschedulable(name, unschedulable, expected_rv))
             audit.log_executed("cordon_node", **args)
             now = bool((result.get("spec") or {}).get("unschedulable"))

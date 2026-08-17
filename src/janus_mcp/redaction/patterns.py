@@ -89,9 +89,16 @@ _PATTERNS: list[tuple[str, re.Pattern[str], str]] = [
         # ("password": "..."), not just shell-shaped ones (password=...).
         # Whitespace is same-line only ([ \t], not \s): a bare YAML map key like
         # "secret:" at end of line must not swallow the next line's key.
+        # The key may be a larger identifier ENDING in a credential keyword —
+        # POSTGRES_PASSWORD=, spring.datasource.password:, apiToken= — a plain
+        # \b anchor missed every underscore/dot-prefixed env-style key. The
+        # keyword must sit immediately before the separator, so tokenizer= and
+        # authors= stay untouched. Values may be quoted strings with spaces;
+        # \S+ alone redacted only up to the first space.
         re.compile(
-            r"(?i)\b(password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key"
-            r"|authorization|auth|bearer|credentials?)\b[\"']?([ \t]*[:=][ \t]*)(\S+)"
+            r"(?i)([\w.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key"
+            r"|authorization|auth|bearer|credentials?))[\"']?([ \t]*[:=][ \t]*)"
+            r"(\"[^\"\n]*\"|'[^'\n]*'|\S+)"
         ),
         r"\1\2[REDACTED]",
     ),
@@ -108,6 +115,20 @@ _ENTROPY_EXEMPT = re.compile(
 _ENTROPY_MIN_LEN = 20
 # Leading/trailing punctuation that should not count toward a token's entropy.
 _TOKEN_TRIM = "\"'`,;:()[]{}<>"  # noqa: S105 (not a credential)
+
+# Node-name shapes for major providers. mask_node_names is enforced
+# structurally on every spec/status field, but scheduler/kubelet EVENT text
+# ("Successfully assigned x to ip-10-1-2-3.ec2.internal") and workload logs
+# embed the same names in free text — best-effort shape masking closes that.
+# Custom node-naming schemes stay a documented residual risk.
+_NODE_NAME_SHAPES = re.compile(
+    r"\b(?:"
+    r"ip(?:-\d{1,3}){4}(?:\.[a-z0-9-]+)*"  # EKS/EC2: ip-10-1-2-3[.region.compute.internal]
+    r"|[a-z0-9][a-z0-9-]*\.(?:ec2|compute)\.internal"
+    r"|gke-[a-z0-9-]+"
+    r"|aks-[a-z0-9-]+"
+    r")\b"
+)
 
 _IPV4 = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 # IPv6 candidates: any run of hex/colon groups with a colon near the start,
@@ -241,6 +262,9 @@ def scrub_text(text: str, settings: RedactionSettings, stats: RedactionStats) ->
     for name, pattern, replacement in _PATTERNS:
         text, n = pattern.subn(replacement, text)
         stats.add(name, n)
+    if settings.mask_node_names:
+        text, n = _NODE_NAME_SHAPES.subn("[MASKED:node]", text)
+        stats.add("node-name", n)
     if settings.mask_external_ips:
         text = _mask_public_ips(text, stats)
     lines = [_entropy_pass(line, settings.entropy_threshold, stats) for line in text.split("\n")]

@@ -21,6 +21,7 @@ from .patterns import RedactionStats
 ENV_VALUE_TOKEN = "[REDACTED:env-value]"  # noqa: S105 (replacement token, not a credential)
 MASKED_NODE = "[MASKED:node]"
 MASKED_IP = "[REDACTED:ip]"
+MASKED_ENDPOINT = "[REDACTED:endpoint]"
 
 # Dropped unconditionally: embeds the entire previously-applied object,
 # including env values and ConfigMap data.
@@ -265,6 +266,11 @@ def _sanitize_service(
         if spec.get("externalIPs"):
             spec["externalIPs"] = [MASKED_IP for _ in spec["externalIPs"]]
             stats.add("ip", len(spec["externalIPs"]))
+        # ExternalName services point at an external endpoint by DNS name —
+        # same sensitivity as an external IP.
+        if spec.get("externalName"):
+            spec["externalName"] = MASKED_ENDPOINT
+            stats.add("endpoint", 1)
     status = obj.get("status")
     if isinstance(status, dict) and settings.mask_external_ips:
         ingress = (status.get("loadBalancer") or {}).get("ingress")
@@ -273,6 +279,11 @@ def _sanitize_service(
                 if "ip" in entry:
                     entry["ip"] = MASKED_IP
                     stats.add("ip", 1)
+                # AWS/EKS load balancers report a hostname, not an ip — the
+                # external endpoint must be masked either way.
+                if "hostname" in entry:
+                    entry["hostname"] = MASKED_ENDPOINT
+                    stats.add("endpoint", 1)
     return obj
 
 

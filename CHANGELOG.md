@@ -4,6 +4,54 @@ All notable changes to janus-mcp are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow SemVer
 (0.x: minor bumps may include behavior changes).
 
+## [Unreleased]
+
+### Security fixes
+
+A second adversarial review pass (same process that produced the 0.2.0
+fixes) over the whole package, including the 0.3.0 surface:
+
+- **Env-style credential keys leaked** (`POSTGRES_PASSWORD=`, `DB_SECRET:`,
+  `spring.datasource.password=`): the key-value scrubber's word-boundary
+  anchor never matched keys where the credential keyword is a suffix.
+  Quoted multi-word values were also only redacted up to the first space.
+- **AWS/EKS load-balancer hostnames bypassed `mask_external_ips`** (only the
+  `ip` key was masked); `spec.externalName` had the same gap. Both now mask
+  as `[REDACTED:endpoint]`.
+- **Node names leaked through free text**: scheduler/kubelet event messages
+  and workload logs embed the node names that every structural field masks.
+  Provider-shaped node names (EC2/EKS, GKE, AKS) are now masked in all
+  scrubbed text; custom naming schemes remain a documented residual risk.
+- **`trigger_cronjob` could run a template the approver never saw**: the Job
+  was built from a re-read at execution time. The approval now binds a hash
+  of the observed jobTemplate, re-verified after approval.
+- **`rollout_undo`'s target guard collapsed for unannotated ReplicaSets**
+  (`to_revision=0` is falsy): the approval now binds a content hash of the
+  target template, with None-safe comparisons throughout the write tools.
+- **Approval burn-on-use race**: two concurrent identical calls could both
+  consume one approval. The burn is now atomic (exactly one unlink wins),
+  covering duplicate in-flight calls and multiple server processes sharing
+  an approvals directory.
+- **`rollout_restart` gains the same resourceVersion binding** as every
+  other state-bound write (it previously patched unconditionally).
+
+### Fixed
+
+- `janus-mcp --config X serve` silently ignored `X` (subparser default
+  clobbered the top-level flag) — the config *is* the security policy, so
+  this could start the server with the wrong scope.
+- `list_namespaces` advertised label filtering but never applied it; the
+  selector now reaches the API (with an explicit note when the per-namespace
+  RBAC fallback cannot apply it).
+- Rollout tools paginate ReplicaSet listing (a single 50-item page could
+  mis-pick current/previous revisions, showing — and rolling back to — the
+  wrong template) and fail closed on pathological cardinality.
+- `get_logs` requests clamp to `limits.log_tail_max` instead of erroring
+  when the operator lowers it; the schema cap now matches the config range.
+- `get_resource_usage` and `list_namespaces` outputs pass Layer 1
+  explicitly (Pod rules / projection); no-op write paths and policy
+  refusals (disabled tools, Secret kind, bare pods) are audited.
+
 ## [0.3.0] — 2026-08-17
 
 A capability release: the read surface grows from "pods and known names" to

@@ -231,3 +231,22 @@ def test_store_expiry(tmp_path) -> None:
 def test_approve_unknown_id(tmp_path) -> None:
     _, store = _gate(tmp_path)
     assert store.approve("doesnotexist") is None
+
+
+def test_consume_burn_is_atomic_under_races(tmp_path) -> None:
+    """Two consumers observing the same approved record must not BOTH be
+    authorized: unlink() succeeds exactly once, the loser gets 'none'."""
+    _, store = _gate(tmp_path)
+    args = {"name": "x", "replicas": 4}
+    approval_id = store.create("scale_deployment", args, "Scale x to 4")
+    store.approve(approval_id)
+
+    # Freeze a stale record listing, simulating a second consumer that read
+    # the directory before the first one burned the file.
+    stale_records = store.list_pending()
+    store.list_pending = lambda: [dict(r) for r in stale_records]  # type: ignore[method-assign]
+
+    first, _, _ = store.consume("scale_deployment", args)
+    second, _, _ = store.consume("scale_deployment", args)
+    assert first == "approved"
+    assert second == "none"  # lost the race -> no authorization

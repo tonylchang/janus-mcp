@@ -156,16 +156,23 @@ async def test_live_write_path_scale_and_restart(tmp_path, cluster_fixtures) -> 
         # the card showed real readiness (N/1 ready), never a fabricated total
         assert cards and "/1 ready" in cards[0]
 
-        restart = await client.call_tool(
-            "rollout_restart",
-            {
-                "kind": "Deployment",
-                "name": "janus-it-web",
-                "namespace": "janus-it",
-                "reason": "integration test",
-            },
-        )
-        assert not restart.isError, restart.content[0].text
+        # The scale above leaves the Deployment reconciling, so the RV-bound
+        # restart may 409 (the guard failing safe) — retry with a fresh read.
+        with anyio.fail_after(60):
+            while True:
+                restart = await client.call_tool(
+                    "rollout_restart",
+                    {
+                        "kind": "Deployment",
+                        "name": "janus-it-web",
+                        "namespace": "janus-it",
+                        "reason": "integration test",
+                    },
+                )
+                if not restart.isError:
+                    break
+                assert "conflict" in restart.content[0].text, restart.content[0].text
+                await anyio.sleep(2)
         assert "restart requested" in restart.content[0].text
 
         # Scale back so the fixture is reusable on repeat runs. The restart above

@@ -194,6 +194,27 @@ def test_service_credential_annotations_dropped() -> None:
     assert out["status"]["loadBalancer"]["ingress"][0]["ip"] == "[REDACTED:ip]"
 
 
+def test_service_external_hostname_and_externalname_masked() -> None:
+    """AWS/EKS load balancers report a hostname instead of an ip — the external
+    endpoint must be masked either way, and ExternalName services too."""
+    obj = {
+        "kind": "Service",
+        "metadata": {"name": "edge", "namespace": "prod"},
+        "spec": {"type": "ExternalName", "externalName": "internal-db.corp.example.com"},
+        "status": {
+            "loadBalancer": {
+                "ingress": [{"hostname": "a1b2c3-1234567890.us-east-1.elb.amazonaws.com"}]
+            }
+        },
+    }
+    out = sanitize_object("Service", obj, RS, RedactionStats())
+    assert out["status"]["loadBalancer"]["ingress"][0]["hostname"] == "[REDACTED:endpoint]"
+    assert out["spec"]["externalName"] == "[REDACTED:endpoint]"
+    blob = json.dumps(out)
+    assert "elb.amazonaws.com" not in blob
+    assert "corp.example.com" not in blob
+
+
 def test_node_masking() -> None:
     out = sanitize("Node", "node.json")
     blob = json.dumps(out)

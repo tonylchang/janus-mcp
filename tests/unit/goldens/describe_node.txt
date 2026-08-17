@@ -1,10 +1,10 @@
 kind: Node
 apiVersion: v1
 metadata:
-  name: ip-10-0-1-23.ec2.internal
+  name: [MASKED:node]
   creationTimestamp: '2026-01-15T00:00:00Z'
   labels:
-    kubernetes.io/hostname: ip-10-0-1-23.ec2.internal
+    kubernetes.io/hostname: [MASKED:node]
     kubernetes.io/os: linux
     node.kubernetes.io/instance-type: m6i.large
     topology.kubernetes.io/zone: us-east-1a

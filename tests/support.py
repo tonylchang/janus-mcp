@@ -121,9 +121,18 @@ class FakeKube:
     def _record(self, method: str, **kwargs: Any) -> None:
         self.calls.append((method, kwargs))
 
-    async def list_namespaces(self) -> list[dict[str, Any]]:
-        self._record("list_namespaces")
-        return list(load_fixture("namespaces.json"))
+    async def list_namespaces(self, label_selector: str | None = None) -> list[dict[str, Any]]:
+        self._record("list_namespaces", label_selector=label_selector)
+        namespaces = list(load_fixture("namespaces.json"))
+        if label_selector:
+            # naive k=v[,k=v] matching, enough to prove pass-through
+            wanted = dict(term.split("=", 1) for term in label_selector.split(","))
+            namespaces = [
+                ns
+                for ns in namespaces
+                if all((ns["metadata"].get("labels") or {}).get(k) == v for k, v in wanted.items())
+            ]
+        return namespaces
 
     async def get_namespace(self, name: str) -> dict[str, Any]:
         self._record("get_namespace", name=name)
@@ -306,10 +315,26 @@ class FakeKube:
         return self.scale_state
 
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]:
-        self._record("rollout_restart", kind=kind, name=name, namespace=namespace, reason=reason)
+        self._record(
+            "rollout_restart",
+            kind=kind,
+            name=name,
+            namespace=namespace,
+            reason=reason,
+            expected_resource_version=expected_resource_version,
+        )
         result = dict(load_fixture("deployment.json"))
+        if expected_resource_version != result["metadata"]["resourceVersion"]:
+            raise KubeError(
+                f"conflict: {kind} {namespace}/{name} changed since it was read; re-read and retry"
+            )
         result["metadata"] = dict(result["metadata"])
         result["metadata"]["generation"] = 15
         return result
@@ -370,7 +395,12 @@ class FakeKube:
         return cronjob
 
     async def create_job_from_cronjob(
-        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+        self,
+        cronjob_name: str,
+        namespace: str,
+        job_name: str,
+        reason: str,
+        job_template: dict[str, Any],
     ) -> dict[str, Any]:
         self._record(
             "create_job_from_cronjob",
@@ -378,6 +408,7 @@ class FakeKube:
             namespace=namespace,
             job_name=job_name,
             reason=reason,
+            job_template=job_template,
         )
         cronjob = load_fixture("cronjob.json")
         if cronjob_name != cronjob["metadata"]["name"] or namespace != "prod":

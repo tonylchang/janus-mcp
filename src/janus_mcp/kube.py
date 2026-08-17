@@ -93,7 +93,7 @@ class ScaleInfo:
 class KubeApi(Protocol):
     """The surface server.py programs against; tests substitute a fake."""
 
-    async def list_namespaces(self) -> list[dict[str, Any]]: ...
+    async def list_namespaces(self, label_selector: str | None = None) -> list[dict[str, Any]]: ...
     async def get_namespace(self, name: str) -> dict[str, Any]: ...
     async def list_pods(
         self,
@@ -131,7 +131,12 @@ class KubeApi(Protocol):
         self, kind: str, name: str, namespace: str, replicas: int, expected_resource_version: str
     ) -> ScaleInfo: ...
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]: ...
     async def delete_pod(self, name: str, namespace: str, expected_uid: str) -> None: ...
     async def patch_deployment_template(
@@ -146,7 +151,12 @@ class KubeApi(Protocol):
         self, name: str, namespace: str, suspend: bool, expected_resource_version: str
     ) -> dict[str, Any]: ...
     async def create_job_from_cronjob(
-        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+        self,
+        cronjob_name: str,
+        namespace: str,
+        job_name: str,
+        reason: str,
+        job_template: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def set_node_unschedulable(
         self, name: str, desired: bool, expected_resource_version: str
@@ -249,8 +259,11 @@ class KubeClient:
         except Exception as exc:
             raise _map_api_error(exc, what) from None
 
-    async def list_namespaces(self) -> list[dict[str, Any]]:
-        result = await self._call("namespaces", self._core.list_namespace)
+    async def list_namespaces(self, label_selector: str | None = None) -> list[dict[str, Any]]:
+        kwargs: dict[str, Any] = {}
+        if label_selector:
+            kwargs["label_selector"] = label_selector
+        result = await self._call("namespaces", self._core.list_namespace, **kwargs)
         return [self._to_dict(item) for item in result.items]
 
     async def get_namespace(self, name: str) -> dict[str, Any]:
@@ -341,21 +354,40 @@ class KubeClient:
         lister = self._listers.get(kind)
         if lister is None:
             raise KubeError(f"kind '{kind}' is not listable")
-        kwargs: dict[str, Any] = {"limit": limit}
-        if label_selector:
-            kwargs["label_selector"] = label_selector
-        result = await self._call(f"{kind} list in {namespace}", lister, namespace, **kwargs)
-        items = []
-        for item in result.items:
-            data = self._to_dict(item)
-            data.setdefault("kind", kind)
-            items.append(data)
+        # Follow continuation tokens up to `limit` — a single page is an
+        # arbitrary name-ordered prefix, not the full set.
+        items: list[dict[str, Any]] = []
+        continue_token: str | None = None
+        while len(items) < limit:
+            kwargs: dict[str, Any] = {"limit": min(200, limit - len(items))}
+            if label_selector:
+                kwargs["label_selector"] = label_selector
+            if continue_token:
+                kwargs["_continue"] = continue_token
+            result = await self._call(f"{kind} list in {namespace}", lister, namespace, **kwargs)
+            for item in result.items:
+                data = self._to_dict(item)
+                data.setdefault("kind", kind)
+                items.append(data)
+            continue_token = (
+                getattr(result.metadata, "_continue", None) if result.metadata else None
+            )
+            if not continue_token:
+                break
         return items
 
     async def list_replica_sets(
         self, namespace: str, label_selector: str | None
     ) -> list[dict[str, Any]]:
-        return await self.list_objects("ReplicaSet", namespace, label_selector, 50)
+        # Rollout tools pick current/previous revisions from this list, so it
+        # must be COMPLETE — a truncated set could roll back to the wrong
+        # template. Fail closed on pathological cardinality.
+        items = await self.list_objects("ReplicaSet", namespace, label_selector, 1000)
+        if len(items) >= 1000:
+            raise KubeError(
+                "too many ReplicaSets match the selector; narrow the Deployment's labels"
+            )
+        return items
 
     async def list_pod_metrics(self, namespace: str) -> list[dict[str, Any]]:
         try:
@@ -448,7 +480,12 @@ class KubeClient:
         )
 
     async def rollout_restart(
-        self, kind: str, name: str, namespace: str, reason: str
+        self,
+        kind: str,
+        name: str,
+        namespace: str,
+        reason: str,
+        expected_resource_version: str,
     ) -> dict[str, Any]:
         patchers: dict[str, Callable[..., Any]] = {
             "Deployment": self._apps.patch_namespaced_deployment,
@@ -460,13 +497,14 @@ class KubeClient:
             raise KubeError(f"kind '{kind}' does not support rollout restart")
         now = datetime.now(UTC).isoformat()
         body = {
+            "metadata": {"resourceVersion": expected_resource_version},
             "spec": {
                 "template": {
                     "metadata": {
                         "annotations": {RESTART_ANNOTATION: now, REASON_ANNOTATION: reason}
                     }
                 }
-            }
+            },
         }
         what = f"{kind} {namespace}/{name}"
         result = await self._call(what, patcher, name, namespace, body)
@@ -523,10 +561,16 @@ class KubeClient:
         return dict(self._to_dict(result))
 
     async def create_job_from_cronjob(
-        self, cronjob_name: str, namespace: str, job_name: str, reason: str
+        self,
+        cronjob_name: str,
+        namespace: str,
+        job_name: str,
+        reason: str,
+        job_template: dict[str, Any],
     ) -> dict[str, Any]:
-        cronjob = await self.get_object("CronJob", cronjob_name, namespace)
-        job_template = (cronjob.get("spec") or {}).get("jobTemplate") or {}
+        # The template is passed in by the caller, which verified it against
+        # the hash bound to the human's approval — re-reading here would let a
+        # template changed during the approval window run unapproved.
         template_meta = job_template.get("metadata") or {}
         job = {
             "apiVersion": "batch/v1",

@@ -107,8 +107,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=None, help="path to config.yaml")
     sub = parser.add_subparsers(dest="command")
 
+    # Subparser --config defaults use SUPPRESS: a subcommand default of None
+    # would silently clobber a top-level `janus-mcp --config X serve`.
     serve_parser = sub.add_parser("serve", help="run the MCP server on stdio (default)")
-    serve_parser.add_argument("--config", type=Path, default=None)
+    serve_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS)
     serve_parser.add_argument("--kubeconfig", type=Path, default=None)
     serve_parser.add_argument(
         "--strict",
@@ -118,10 +120,10 @@ def main(argv: list[str] | None = None) -> int:
 
     approve_parser = sub.add_parser("approve", help="approve a pending write operation")
     approve_parser.add_argument("approval_id")
-    approve_parser.add_argument("--config", type=Path, default=None)
+    approve_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS)
 
     approvals_parser = sub.add_parser("approvals", help="list pending write approvals")
-    approvals_parser.add_argument("--config", type=Path, default=None)
+    approvals_parser.add_argument("--config", type=Path, default=argparse.SUPPRESS)
 
     args = parser.parse_args(argv)
 
