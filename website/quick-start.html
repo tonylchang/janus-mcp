@@ -71,11 +71,19 @@
       <main style="flex: 1 1 460px; max-width: 72ch; padding: 28px 0 clamp(40px, 6vw, 64px); min-width: 0;">
         <section id="install">
           <h2 style="font-size: 26px; margin: 0 0 14px; letter-spacing: -0.018em;">01 Install</h2>
-          <p style="margin: 0 0 16px;">Any of the three gives you the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">janus-mcp</code> CLI.</p>
+          <p style="margin: 0 0 16px;">Any of these gives you the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">janus-mcp</code> CLI.</p>
           <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">uv tool install janus-mcp-server
 pipx install janus-mcp-server
-pip install janus-mcp-server</pre>
+pip install janus-mcp-server
+brew install tonylchang/tap/janus-mcp</pre>
           <p style="margin: 0 0 16px;">One-shot, no install: <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">uvx janus-mcp-server serve</code>. From a source checkout, clone the repo, run <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">uv sync</code>, and prefix every command with <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">uv run</code>.</p>
+          <p style="margin: 0 0 16px;"><strong>Container image</strong> (no Python toolchain needed): every <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">janus-mcp …</code> below becomes the following, with the kubeconfig and config mounted read-only and the state directory shared read-write so the audit log lands on the host and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">janus-mcp approve &lt;id&gt;</code> works across the container boundary. Pin a digest for reproducible deployments.</p>
+          <pre style="margin: 0 0 16px; background: #201e1d; color: #f3f2f2; padding: 18px 20px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; line-height: 1.7;">docker run -i --rm \
+  -v ~/.kube/config:/home/janus/.kube/config:ro \
+  -v ~/.config/janus-mcp:/home/janus/.config/janus-mcp:ro \
+  -v ~/.local/state/janus-mcp:/home/janus/.local/state/janus-mcp \
+  ghcr.io/tonylchang/janus-mcp:latest …</pre>
+          <p style="margin: 0 0 16px;">janus-mcp is also listed in the official <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener">MCP Registry</a> as <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--color-neutral-200); padding: 1px 5px;">io.github.tonylchang/janus-mcp</code>; registry-aware clients can discover and install it without any of the above.</p>
         </section>
         <hr class="hr" style="margin: 32px 0;">
 

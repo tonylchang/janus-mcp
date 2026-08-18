@@ -228,7 +228,7 @@
             <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">01</span>
             <span style="font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;">Install</span>
           </div>
-          <p style="margin: 0 0 14px; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Three ways from PyPI, all giving you the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">janus-mcp</code> CLI. Contributors can clone and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">uv sync</code> instead.</p>
+          <p style="margin: 0 0 14px; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">PyPI, Homebrew, or a container image — the first four give you the <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">janus-mcp</code> CLI. Contributors can clone and <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">uv sync</code> instead.</p>
           <div style="border: 2px solid var(--color-divider); display: flex; flex-direction: column;">
             <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px;">
               <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">uv</span>
@@ -242,8 +242,17 @@
               <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">pip</span>
               <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">pip install janus-mcp-server</code>
             </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--color-divider);">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">brew</span>
+              <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">brew install tonylchang/tap/janus-mcp</code>
+            </div>
+            <div style="display: grid; grid-template-columns: minmax(0, 116px) minmax(0, 1fr); align-items: center; gap: 16px; padding: 14px 18px; border-top: 1px solid var(--color-divider);">
+              <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase; color: color-mix(in srgb, var(--color-text) 60%, transparent);">docker</span>
+              <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; overflow: auto;">docker pull ghcr.io/tonylchang/janus-mcp</code>
+            </div>
           </div>
           <p style="margin: 14px 0 0; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">No install at all: <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">uvx janus-mcp-server serve</code> runs it one-shot.</p>
+          <p style="margin: 10px 0 0; font-size: 15px; color: color-mix(in srgb, var(--color-text) 70%, transparent);">Also in the official <a href="https://registry.modelcontextprotocol.io" target="_blank" rel="noopener">MCP Registry</a> as <code style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em;">io.github.tonylchang/janus-mcp</code> — registry-aware clients can install it directly.</p>
 
           <div style="height: 40px;"></div><div style="display: flex; align-items: baseline; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--color-divider); margin-bottom: 14px;">
             <span style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; color: var(--color-accent-700);">02</span>
