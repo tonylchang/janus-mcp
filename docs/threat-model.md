@@ -1,9 +1,3 @@
----
-layout: doc
-title: Threat model
-description: The five security invariants of janus-mcp, the attack surfaces they close, and how CI verifies them.
----
-
 # Threat model
 
 ## What janus-mcp protects

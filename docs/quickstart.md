@@ -1,9 +1,3 @@
----
-layout: doc
-title: Quick start
-description: Zero to a safe Kubernetes copilot — install janus-mcp, pin a context, and register it with your MCP client.
----
-
 # Quick start
 
 Shortest path from zero to asking an AI assistant about your cluster, with the
