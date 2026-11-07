@@ -16,7 +16,7 @@
 #     -v ~/.local/state/janus-mcp:/home/janus/.local/state/janus-mcp \
 #     ghcr.io/tonylchang/janus-mcp:latest
 
-FROM ghcr.io/astral-sh/uv@sha256:531f855bda2c73cd6ef67d56b733b357cea384185b3022bd09f05e002cd144ca AS builder
+FROM ghcr.io/astral-sh/uv@sha256:96f40d3904aad8d0bd010539001d36c8e2188b981e1334471a90c4a1d93bb490 AS builder
 # ghcr.io/astral-sh/uv:python3.13-bookworm-slim
 WORKDIR /src
 COPY pyproject.toml uv.lock README.md LICENSE ./
